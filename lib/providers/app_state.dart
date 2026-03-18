@@ -10,11 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import '../database/database_service.dart';
 import '../models/paper.dart';
 import '../models/tag.dart';
-import '../models/import_data.dart';
-import '../models/paper_folder.dart';
 import '../services/pdf_service.dart';
 import '../services/arxiv_service.dart';
-import '../services/folder_import_service.dart';
 
 class _NavigationState {
   final Tag? tag;

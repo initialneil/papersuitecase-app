@@ -7,12 +7,9 @@ import '../widgets/search_bar.dart';
 import '../widgets/tag_cards.dart';
 import '../widgets/paper_grid.dart';
 import '../widgets/drop_zone.dart';
-import '../widgets/import_dialog.dart';
 import '../widgets/settings_view.dart';
 import '../widgets/embedded_pdf_viewer.dart';
-import '../widgets/folder_drop_dialog.dart';
 import 'package:flutter/services.dart';
-import 'package:path/path.dart' as p;
 
 /// Main application screen
 class MainScreen extends StatefulWidget {
@@ -93,159 +90,30 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // TODO: Remove in Task 9 — rewrite drop/import handlers
   Future<void> _handlePdfDrop(
     BuildContext context,
     List<String> paths,
     AppState appState,
   ) async {
-    final result = await ImportDialog.showForFiles(
-      context,
-      paths,
-      currentTag: appState.selectedTag,
-    );
-
-    if (result == true) {
-      // Import was successful
-    }
+    // ImportDialog removed — will be rewritten in Task 9
   }
 
+  // TODO: Remove in Task 9 — rewrite folder drop handler
   Future<void> _handleFolderDrop(
     BuildContext context,
     String path,
     AppState appState,
   ) async {
-    // 1. Show Choice Dialog
-    final result = await showDialog<FolderDropResult>(
-      context: context,
-      builder: (context) =>
-          FolderDropDialog(folderPath: path, currentTag: appState.selectedTag),
-    );
-
-    if (result == null) return; // Cancelled
-
-    // 2. Handle Action
-    if (result.action == FolderDropAction.linkSymbolic) {
-      try {
-        // Just link the folder directly
-        final name = p.basename(path);
-        // "default root" -> parentId: null (or appState.selectedFolder if we wanted key-hole dropping)
-        // User asked "set import location, default root", but that was under "Import Files".
-        // For symbolic link, usually it's root unless dropped ON a folder.
-        // Here we just drop on the pane. So Root.
-        await appState.createFolder(
-          name,
-          path: path,
-          isSymbolic: true,
-          parentId: null,
-        );
-
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Linked folder "$name"')));
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Failed to link folder: $e')));
-        }
-      }
-      return;
-    }
-
-    // 3. Import Files Action
-    if (result.action == FolderDropAction.importFiles) {
-      // Show loading indicator
-      if (!context.mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const AlertDialog(
-          content: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 20),
-              Text('Scanning folder...'),
-            ],
-          ),
-        ),
-      );
-
-      // Scan folder
-      final scanResult = await appState.scanFolder(path);
-
-      // Close loading dialog
-      if (context.mounted) {
-        Navigator.pop(context);
-      }
-
-      if (scanResult == null || scanResult.files.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No PDF files found in folder')),
-          );
-        }
-        return;
-      }
-
-      // Show import dialog with pre-filled settings
-      if (context.mounted) {
-        await ImportDialog.showForFolder(
-          context,
-          scanResult,
-          currentTag: result.assignTag,
-          initialImportAsLink: result.importAsLink,
-        );
-      }
-    }
+    // FolderDropDialog removed — will be rewritten in Task 9
   }
 
+  // TODO: Remove in Task 9 — rewrite arXiv import handler
   Future<void> _handleArxivImport(
     BuildContext context,
     AppState appState,
   ) async {
-    final url = appState.detectedArxivUrl;
-    if (url == null) return;
-
-    // Show loading indicator
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 20),
-            Text('Fetching arXiv metadata...'),
-          ],
-        ),
-      ),
-    );
-
-    // Fetch metadata
-    final metadata = await appState.fetchArxivMetadata(url);
-
-    // Close loading dialog
-    if (context.mounted) {
-      Navigator.pop(context);
-    }
-
-    if (metadata == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not fetch arXiv metadata')),
-        );
-      }
-      return;
-    }
-
-    // Show import dialog
-    if (context.mounted) {
-      await ImportDialog.showForArxiv(
-        context,
-        metadata,
-        currentTag: appState.selectedTag,
-      );
-    }
+    // ImportDialog removed — will be rewritten in Task 9
   }
 }
 

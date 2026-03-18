@@ -1,11 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import '../models/paper.dart';
-import '../services/reference_service.dart';
-import '../providers/app_state.dart';
-import 'paper_card.dart';
 
 class EmbeddedPdfViewer extends StatefulWidget {
   final Paper paper;
@@ -25,7 +21,7 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
   final PdfViewerController _controller = PdfViewerController();
   final GlobalKey<SfPdfViewerState> _pdfViewerKey = GlobalKey();
 
-  List<ReferenceInfo> _references = [];
+  // TODO: Remove in Task 9 — reference indexing removed (ReferenceService deleted)
   bool _isIndexing = false;
   OverlayEntry? _tooltipEntry;
 
@@ -36,15 +32,11 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
   @override
   void initState() {
     super.initState();
-    _indexReferences();
   }
 
   @override
   void didUpdateWidget(EmbeddedPdfViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.paper.filePath != widget.paper.filePath) {
-      _indexReferences();
-    }
   }
 
   @override
@@ -54,292 +46,9 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
     super.dispose();
   }
 
-  Future<void> _indexReferences() async {
-    setState(() => _isIndexing = true);
-    try {
-      debugPrint('🔍 Indexing references for ${widget.paper.title}...');
-      final refs = await ReferenceService.extractReferences(
-        widget.paper.filePath,
-      );
-      if (!mounted) return;
-
-      debugPrint('📚 Extracted ${refs.length} bibliography entries');
-
-      if (mounted) {
-        setState(() {
-          _references = refs;
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error indexing: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isIndexing = false);
-      }
-    }
-  }
-
   void _hideTooltip() {
     _tooltipEntry?.remove();
     _tooltipEntry = null;
-  }
-
-  Future<void> _handleRightClick(Offset position) async {
-    if (_references.isEmpty) return;
-
-    // Since we can't detect which specific reference was clicked,
-    // let's provide a smarter menu:
-    // 1. If there's only one reference, show it directly
-    // 2. Otherwise, show the selection menu
-
-    if (_references.length == 1) {
-      // Auto-show the only reference
-      final ref = _references[0];
-      final appState = context.read<AppState>();
-      final Paper? foundPaper = await appState.getPaperByTitle(ref.title);
-      if (mounted) {
-        _showTooltip(ref, position, foundPaper);
-      }
-    } else {
-      // Show selection menu for multiple references
-      _showReferenceSelectionMenu(position, 'Select Reference');
-    }
-  }
-
-  void _showReferenceSelectionMenu(Offset position, String title) {
-    if (_references.isEmpty) return;
-
-    String searchQuery = '';
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          final filteredRefs = searchQuery.isEmpty
-              ? _references
-              : _references.where((ref) {
-                  final query = searchQuery.toLowerCase();
-                  return ref.marker.toLowerCase().contains(query) ||
-                      ref.title.toLowerCase().contains(query);
-                }).toList();
-
-          return AlertDialog(
-            title: Row(
-              children: [
-                const Icon(Icons.search, size: 20),
-                const SizedBox(width: 8),
-                Expanded(child: Text(title)),
-              ],
-            ),
-            content: SizedBox(
-              width: 500,
-              height: 600,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      hintText: 'Search by number or title...',
-                      prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                    ),
-                    onChanged: (value) {
-                      setState(() => searchQuery = value);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    '${filteredRefs.length} reference${filteredRefs.length == 1 ? '' : 's'}',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: filteredRefs.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'No references found',
-                              style: TextStyle(color: Colors.black54),
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: filteredRefs.length,
-                            itemBuilder: (context, index) {
-                              final ref = filteredRefs[index];
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                child: ListTile(
-                                  dense: true,
-                                  leading: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.blue,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      ref.marker,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    ref.title,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 13),
-                                  ),
-                                  onTap: () async {
-                                    Navigator.of(context).pop();
-                                    final appState = context.read<AppState>();
-                                    final Paper? foundPaper = await appState
-                                        .getPaperByTitle(ref.title);
-                                    if (mounted) {
-                                      _showTooltip(ref, position, foundPaper);
-                                    }
-                                  },
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  void _showTooltip(ReferenceInfo info, Offset position, Paper? foundPaper) {
-    _hideTooltip();
-
-    _tooltipEntry = OverlayEntry(
-      builder: (overlayContext) {
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _hideTooltip,
-                behavior: HitTestBehavior.translucent,
-                child: Container(color: Colors.transparent),
-              ),
-            ),
-            Positioned(
-              left: position.dx + 10,
-              top: position.dy + 10,
-              child: GestureDetector(
-                onTap: () {
-                  if (foundPaper != null) {
-                    _hideTooltip();
-                    context.read<AppState>().openPaper(foundPaper);
-                  }
-                },
-                child: Material(
-                  elevation: 8,
-                  borderRadius: BorderRadius.circular(12),
-                  clipBehavior: Clip.antiAlias,
-                  child: foundPaper != null
-                      ? Container(
-                          width: 280,
-                          constraints: const BoxConstraints(maxHeight: 400),
-                          child: PaperCard(
-                            paper: foundPaper,
-                            isSelected: false,
-                            onTap: () {
-                              _hideTooltip();
-                              context.read<AppState>().openPaper(foundPaper);
-                            },
-                          ),
-                        )
-                      : _buildInfoCard(info),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-
-    Overlay.of(context).insert(_tooltipEntry!);
-  }
-
-  Widget _buildInfoCard(ReferenceInfo info) {
-    return Container(
-      width: 280,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            info.title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-          ),
-          if (info.authors != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              info.authors!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(
-                  context,
-                ).colorScheme.onSurface.withValues(alpha: 0.6),
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Icon(
-                Icons.help_outline,
-                size: 14,
-                color: Theme.of(
-                  context,
-                ).colorScheme.onSurface.withValues(alpha: 0.5),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                'Not in Suitecase',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.5),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -397,11 +106,7 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
       body: Stack(
         children: [
           GestureDetector(
-            onSecondaryTapDown: (details) {
-              if (!_isHighlightMode && !_isUnderlineMode) {
-                _handleRightClick(details.localPosition);
-              }
-            },
+            // TODO: Remove in Task 9 — reference right-click removed (ReferenceService deleted)
             child: SfPdfViewer.file(
               File(widget.paper.filePath),
               key: _pdfViewerKey,

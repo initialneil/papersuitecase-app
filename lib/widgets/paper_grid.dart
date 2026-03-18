@@ -3,9 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/app_state.dart';
-import '../models/paper_folder.dart';
 import 'paper_card.dart';
-import 'folder_card.dart';
 
 /// Grid of paper cards
 class PaperGrid extends StatefulWidget {
@@ -37,7 +35,9 @@ class _PaperGridState extends State<PaperGrid> {
     final appState = context.watch<AppState>();
     final papers = appState.papers;
     // Only show folders when we're inside a folder, not in "All Papers" view
-    final folders = appState.selectedFolder != null ? appState.visibleSubFolders : [];
+    final folders = appState.selectedFolder != null
+        ? appState.visibleSubFolders
+        : [];
 
     if (papers.isEmpty && folders.isEmpty) {
       if (appState.isLoading) {

@@ -1,4 +1,4 @@
-platform :osx, '10.15'
+platform :osx, '12.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -38,5 +38,16 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
+    target.build_configurations.each do |config|
+      # Force correct SDK / Toolchain paths instead of broken MetalToolchain
+      # Force TOOLCHAIN_DIR to Default Xcode toolchain to fix Metal library search paths
+      config.build_settings['TOOLCHAIN_DIR'] = '$(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain'
+      config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+      
+      # Also add weak linkage for SwiftUICore
+      other_ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+      other_ldflags = [other_ldflags] if other_ldflags.is_a?(String)
+      config.build_settings['OTHER_LDFLAGS'] = other_ldflags + ['-Wl,-weak-lswiftCoreImage']
+    end
   end
 end

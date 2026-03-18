@@ -8,8 +8,6 @@ import 'package:path/path.dart' as p;
 import '../providers/app_state.dart';
 import '../models/tag.dart';
 import '../models/paper.dart';
-import '../models/paper_folder.dart';
-import 'paper_attributes_editor.dart';
 
 /// Sidebar widget showing hierarchical tag tree
 class TagSidebar extends StatefulWidget {

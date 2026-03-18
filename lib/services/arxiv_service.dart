@@ -4,7 +4,27 @@ import 'package:xml/xml.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import '../models/import_data.dart';
+/// arXiv paper metadata
+class ArxivMetadata {
+  final String arxivId;
+  final String title;
+  final String authors;
+  final String abstract;
+  final String pdfUrl;
+  final String? category;
+
+  ArxivMetadata({
+    required this.arxivId,
+    required this.title,
+    required this.authors,
+    required this.abstract,
+    required this.pdfUrl,
+    this.category,
+  });
+
+  @override
+  String toString() => 'ArxivMetadata($arxivId: $title)';
+}
 
 /// Service for interacting with arXiv API
 class ArxivService {
