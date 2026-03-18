@@ -8,6 +8,7 @@ import '../models/paper.dart';
 
 import '../services/pdf_service.dart';
 import '../providers/app_state.dart';
+import 'edit_tags_dialog.dart';
 
 /// Single paper card widget
 class PaperCard extends StatefulWidget {
@@ -47,13 +48,13 @@ class _PaperCardState extends State<PaperCard> {
   }
 
   Future<void> _loadThumbnail() async {
-    if (widget.paper.filePath == null || widget.paper.id == null) return;
+    if (widget.paper.id == null) return;
 
     // Don't block UI
     Future.microtask(() async {
       if (!mounted) return;
       final path = await PdfService.generateThumbnail(
-        widget.paper.filePath!,
+        widget.paper.filePath,
         widget.paper.id!,
       );
 
@@ -71,14 +72,14 @@ class _PaperCardState extends State<PaperCard> {
       duration: const Duration(milliseconds: 150),
       decoration: BoxDecoration(
         color: widget.isSelected
-            ? colorScheme.primary.withOpacity(0.2)
+            ? colorScheme.primary.withValues(alpha: 0.2)
             : colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: widget.isSelected
               ? colorScheme.primary
               : Theme.of(context).brightness == Brightness.dark
-              ? Colors.white.withOpacity(0.1)
+              ? Colors.white.withValues(alpha: 0.1)
               : Colors.transparent,
           width: widget.isSelected ? 2 : 1,
         ),
@@ -86,7 +87,7 @@ class _PaperCardState extends State<PaperCard> {
           if (!widget.isSelected &&
               Theme.of(context).brightness == Brightness.light)
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -117,7 +118,7 @@ class _PaperCardState extends State<PaperCard> {
                           decoration: BoxDecoration(
                             color: Theme.of(
                               context,
-                            ).colorScheme.error.withOpacity(0.1),
+                            ).colorScheme.error.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Icon(
@@ -148,7 +149,7 @@ class _PaperCardState extends State<PaperCard> {
                                         color: Theme.of(context)
                                             .colorScheme
                                             .onSurface
-                                            .withOpacity(0.6),
+                                            .withValues(alpha: 0.6),
                                       ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -197,7 +198,7 @@ class _PaperCardState extends State<PaperCard> {
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Theme.of(
                             context,
-                          ).colorScheme.onSurface.withOpacity(0.4),
+                          ).colorScheme.onSurface.withValues(alpha: 0.4),
                           fontStyle: FontStyle.italic,
                           fontSize: 10,
                         ),
@@ -213,7 +214,7 @@ class _PaperCardState extends State<PaperCard> {
                           size: 14,
                           color: Theme.of(
                             context,
-                          ).colorScheme.onSurface.withOpacity(0.4),
+                          ).colorScheme.onSurface.withValues(alpha: 0.4),
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -222,7 +223,7 @@ class _PaperCardState extends State<PaperCard> {
                               ?.copyWith(
                                 color: Theme.of(
                                   context,
-                                ).colorScheme.onSurface.withOpacity(0.5),
+                                ).colorScheme.onSurface.withValues(alpha: 0.5),
                                 fontSize: 10,
                               ),
                         ),
@@ -269,34 +270,59 @@ class _PaperCardState extends State<PaperCard> {
                     ), // -1 for border width
                     child: Container(
                       width: double.infinity,
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
-                      child: _thumbnailPath != null
-                          ? Image.file(
-                              File(_thumbnailPath!),
-                              fit: BoxFit.cover,
-                              alignment: Alignment.topCenter,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  Center(
-                                    child: Icon(
-                                      Icons.broken_image_outlined,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant
-                                          .withOpacity(0.5),
-                                    ),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.3),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _thumbnailPath != null
+                              ? Image.file(
+                                  File(_thumbnailPath!),
+                                  fit: BoxFit.cover,
+                                  alignment: Alignment.topCenter,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      Center(
+                                        child: Icon(
+                                          Icons.broken_image_outlined,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant
+                                              .withValues(alpha: 0.5),
+                                        ),
+                                      ),
+                                )
+                              : Center(
+                                  child: Icon(
+                                    Icons.image_outlined,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant
+                                        .withValues(alpha: 0.2),
+                                    size: 48,
                                   ),
-                            )
-                          : Center(
-                              child: Icon(
-                                Icons.image_outlined,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant.withOpacity(0.2),
-                                size: 48,
+                                ),
+                          // Symbolic link badge
+                          if (widget.paper.isSymbolicLink)
+                            Positioned(
+                              bottom: 8,
+                              left: 8,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.shortcut,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
                               ),
                             ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -348,20 +374,22 @@ class _PaperCardState extends State<PaperCard> {
           ),
           onTap: () => appState.revealPaperInFinder(widget.paper),
         ),
-        if (!isMultiSelection)
-          PopupMenuItem(
-            enabled: false, // Placeholder
-            child: const Row(
-              children: [
-                Icon(Icons.edit_outlined, size: 18),
-                SizedBox(width: 8),
-                Text('Edit tags'),
-              ],
-            ),
-            onTap: () {
-              // Will be implemented with import dialog
-            },
+        PopupMenuItem(
+          child: const Row(
+            children: [
+              Icon(Icons.edit_outlined, size: 18),
+              SizedBox(width: 8),
+              Text('Edit tags'),
+            ],
           ),
+          onTap: () {
+            Future.delayed(Duration.zero, () {
+              if (context.mounted) {
+                _showEditTagsDialog(context, appState);
+              }
+            });
+          },
+        ),
 
         // Assign Tags from persistent context
         if (appState.lastActiveTagPath.isNotEmpty) ...[
@@ -407,6 +435,18 @@ class _PaperCardState extends State<PaperCard> {
         ),
       ],
     );
+  }
+
+  void _showEditTagsDialog(BuildContext context, AppState appState) {
+    showDialog(
+      context: context,
+      builder: (context) =>
+          EditTagsDialog(paperIds: appState.selectedPaperIds.toList()),
+    ).then((result) {
+      if (result == true) {
+        // Tags were updated, refresh will happen automatically via AppState
+      }
+    });
   }
 
   void _showDeleteConfirmation(BuildContext context, AppState appState) {

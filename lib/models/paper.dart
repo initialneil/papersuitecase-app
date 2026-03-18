@@ -10,6 +10,10 @@ class Paper {
   final String? abstract;
   final String? extractedText;
   final DateTime addedAt;
+  final bool isSymbolicLink;
+  final String? arxivUrl;
+  final String? bibtex;
+  final int? folderId;
   List<Tag> tags;
 
   Paper({
@@ -21,6 +25,10 @@ class Paper {
     this.abstract,
     this.extractedText,
     DateTime? addedAt,
+    this.isSymbolicLink = false,
+    this.arxivUrl,
+    this.bibtex,
+    this.folderId,
     List<Tag>? tags,
   }) : addedAt = addedAt ?? DateTime.now(),
        tags = tags ?? [];
@@ -60,6 +68,10 @@ class Paper {
       'abstract': abstract,
       'extracted_text': extractedText,
       'added_at': addedAt.toIso8601String(),
+      'is_symbolic_link': isSymbolicLink ? 1 : 0,
+      'arxiv_url': arxivUrl,
+      'bibtex': bibtex,
+      'folder_id': folderId,
     };
   }
 
@@ -73,6 +85,10 @@ class Paper {
       abstract: map['abstract'] as String?,
       extractedText: map['extracted_text'] as String?,
       addedAt: DateTime.parse(map['added_at'] as String),
+      isSymbolicLink: (map['is_symbolic_link'] as int?) == 1,
+      arxivUrl: map['arxiv_url'] as String?,
+      bibtex: map['bibtex'] as String?,
+      folderId: map['folder_id'] as int?,
       tags: tags,
     );
   }
@@ -86,6 +102,9 @@ class Paper {
     String? abstract,
     String? extractedText,
     DateTime? addedAt,
+    bool? isSymbolicLink,
+    String? arxivUrl,
+    String? bibtex,
     List<Tag>? tags,
   }) {
     return Paper(
@@ -97,6 +116,9 @@ class Paper {
       abstract: abstract ?? this.abstract,
       extractedText: extractedText ?? this.extractedText,
       addedAt: addedAt ?? this.addedAt,
+      isSymbolicLink: isSymbolicLink ?? this.isSymbolicLink,
+      arxivUrl: arxivUrl ?? this.arxivUrl,
+      bibtex: bibtex ?? this.bibtex,
       tags: tags ?? this.tags,
     );
   }

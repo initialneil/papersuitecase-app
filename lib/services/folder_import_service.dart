@@ -96,4 +96,18 @@ class FolderImportService {
 
     return hierarchy;
   }
+
+  /// Get immediate subfolders of a given path
+  static Future<List<Directory>> getSubDirectories(String path) async {
+    final dir = Directory(path);
+    if (!await dir.exists()) return [];
+
+    try {
+      final entities = await dir.list().toList();
+      return entities.whereType<Directory>().toList();
+    } catch (e) {
+      print('Error listing directory $path: $e');
+      return [];
+    }
+  }
 }

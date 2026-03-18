@@ -60,7 +60,7 @@ class PaperSuitecaseApp extends StatelessWidget {
         primary: primaryColor,
         surface: surfaceColor,
         onSurface: Colors.black,
-        outline: Colors.grey.withOpacity(0.3),
+        outline: Colors.grey.withValues(alpha: 0.3),
         brightness: Brightness.light,
       ),
       scaffoldBackgroundColor: scaffoldColor,
@@ -71,7 +71,7 @@ class PaperSuitecaseApp extends StatelessWidget {
         margin: EdgeInsets.all(0),
       ),
       dividerTheme: DividerThemeData(
-        color: Colors.grey.withOpacity(0.2),
+        color: Colors.grey.withValues(alpha: 0.2),
         space: 1,
       ),
       // macOS style buttons
@@ -100,7 +100,7 @@ class PaperSuitecaseApp extends StatelessWidget {
         primary: primaryColor,
         surface: surfaceColor,
         onSurface: Colors.white,
-        outline: Colors.white.withOpacity(0.1),
+        outline: Colors.white.withValues(alpha: 0.1),
         brightness: Brightness.dark,
       ),
       scaffoldBackgroundColor: scaffoldColor,
@@ -111,7 +111,7 @@ class PaperSuitecaseApp extends StatelessWidget {
         margin: EdgeInsets.all(0),
       ),
       dividerTheme: DividerThemeData(
-        color: Colors.white.withOpacity(0.1),
+        color: Colors.white.withValues(alpha: 0.1),
         space: 1,
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -124,7 +124,7 @@ class PaperSuitecaseApp extends StatelessWidget {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: Colors.white.withOpacity(0.1),
+        fillColor: Colors.white.withValues(alpha: 0.1),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide.none,

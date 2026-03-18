@@ -51,7 +51,22 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
           ),
           child: Row(
             children: [
-              const SizedBox(width: 16),
+              // Navigation Buttons
+              IconButton(
+                icon: const Icon(Icons.arrow_back, size: 20),
+                onPressed: appState.canGoBack ? appState.navigateBack : null,
+                tooltip: 'Back',
+              ),
+              IconButton(
+                icon: const Icon(Icons.arrow_forward, size: 20),
+                onPressed: appState.canGoForward
+                    ? appState.navigateForward
+                    : null,
+                tooltip: 'Forward',
+              ),
+              const SizedBox(width: 8),
+
+              const SizedBox(width: 8),
               Icon(
                 Icons.search,
                 color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),

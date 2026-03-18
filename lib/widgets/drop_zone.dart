@@ -94,7 +94,7 @@ class _DropOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
       child: Center(
         child: Container(
           padding: const EdgeInsets.all(40),
@@ -108,7 +108,7 @@ class _DropOverlay extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: Theme.of(context).shadowColor.withOpacity(0.2),
+                color: Theme.of(context).shadowColor.withValues(alpha: 0.2),
                 blurRadius: 20,
                 offset: const Offset(0, 4),
               ),
@@ -138,7 +138,7 @@ class _DropOverlay extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Theme.of(
                     context,
-                  ).colorScheme.onSurface.withOpacity(0.6),
+                  ).colorScheme.onSurface.withValues(alpha: 0.6),
                 ),
               ),
             ],

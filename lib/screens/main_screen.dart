@@ -10,7 +10,9 @@ import '../widgets/drop_zone.dart';
 import '../widgets/import_dialog.dart';
 import '../widgets/settings_view.dart';
 import '../widgets/embedded_pdf_viewer.dart';
+import '../widgets/folder_drop_dialog.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 /// Main application screen
 class MainScreen extends StatefulWidget {
@@ -20,37 +22,43 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
+class CloseIntent extends Intent {
+  const CloseIntent();
+}
+
 class _MainScreenState extends State<MainScreen> {
-  final FocusNode _focusNode = FocusNode();
-
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Consumer<AppState>(
-      builder: (context, appState, child) {
-        return KeyboardListener(
-          focusNode: _focusNode..requestFocus(),
-          onKeyEvent: (event) {
-            if (event is KeyDownEvent &&
-                event.logicalKey == LogicalKeyboardKey.escape) {
+    return Shortcuts(
+      shortcuts: <ShortcutActivator, Intent>{
+        const SingleActivator(LogicalKeyboardKey.escape): const CloseIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          CloseIntent: CallbackAction<CloseIntent>(
+            onInvoke: (intent) {
+              final appState = context.read<AppState>();
               if (appState.viewingPaper != null) {
                 appState.closePaperViewer();
               } else if (appState.isConfigMode) {
                 appState.toggleConfigMode();
               }
-            }
-          },
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
           child: Scaffold(
             body: DropZone(
-              onPdfFilesDropped: (paths) =>
-                  _handlePdfDrop(context, paths, appState),
-              onFolderDropped: (path) =>
-                  _handleFolderDrop(context, path, appState),
+              onPdfFilesDropped: (paths) {
+                final appState = context.read<AppState>();
+                _handlePdfDrop(context, paths, appState);
+              },
+              onFolderDropped: (path) {
+                final appState = context.read<AppState>();
+                _handleFolderDrop(context, path, appState);
+              },
               child: Row(
                 children: [
                   // Left sidebar
@@ -58,24 +66,30 @@ class _MainScreenState extends State<MainScreen> {
 
                   // Main content area
                   Expanded(
-                    child: appState.viewingPaper != null
-                        ? EmbeddedPdfViewer(
+                    child: Consumer<AppState>(
+                      builder: (context, appState, child) {
+                        if (appState.viewingPaper != null) {
+                          return EmbeddedPdfViewer(
                             paper: appState.viewingPaper!,
                             onBack: () => appState.closePaperViewer(),
-                          )
-                        : appState.isConfigMode
-                        ? const SettingsView()
-                        : _MainContent(
+                          );
+                        } else if (appState.isConfigMode) {
+                          return const SettingsView();
+                        } else {
+                          return _MainContent(
                             onImportArxiv: () =>
                                 _handleArxivImport(context, appState),
-                          ),
+                          );
+                        }
+                      },
+                    ),
                   ),
                 ],
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -100,45 +114,88 @@ class _MainScreenState extends State<MainScreen> {
     String path,
     AppState appState,
   ) async {
-    // Show loading indicator
-    showDialog(
+    // 1. Show Choice Dialog
+    final result = await showDialog<FolderDropResult>(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 20),
-            Text('Scanning folder...'),
-          ],
-        ),
-      ),
+      builder: (context) =>
+          FolderDropDialog(folderPath: path, currentTag: appState.selectedTag),
     );
 
-    // Scan folder
-    final scanResult = await appState.scanFolder(path);
+    if (result == null) return; // Cancelled
 
-    // Close loading dialog
-    if (context.mounted) {
-      Navigator.pop(context);
-    }
-
-    if (scanResult == null || scanResult.files.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No PDF files found in folder')),
+    // 2. Handle Action
+    if (result.action == FolderDropAction.linkSymbolic) {
+      try {
+        // Just link the folder directly
+        final name = p.basename(path);
+        // "default root" -> parentId: null (or appState.selectedFolder if we wanted key-hole dropping)
+        // User asked "set import location, default root", but that was under "Import Files".
+        // For symbolic link, usually it's root unless dropped ON a folder.
+        // Here we just drop on the pane. So Root.
+        await appState.createFolder(
+          name,
+          path: path,
+          isSymbolic: true,
+          parentId: null,
         );
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Linked folder "$name"')));
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Failed to link folder: $e')));
+        }
       }
       return;
     }
 
-    // Show import dialog
-    if (context.mounted) {
-      await ImportDialog.showForFolder(
-        context,
-        scanResult,
-        currentTag: appState.selectedTag,
+    // 3. Import Files Action
+    if (result.action == FolderDropAction.importFiles) {
+      // Show loading indicator
+      if (!context.mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text('Scanning folder...'),
+            ],
+          ),
+        ),
       );
+
+      // Scan folder
+      final scanResult = await appState.scanFolder(path);
+
+      // Close loading dialog
+      if (context.mounted) {
+        Navigator.pop(context);
+      }
+
+      if (scanResult == null || scanResult.files.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No PDF files found in folder')),
+          );
+        }
+        return;
+      }
+
+      // Show import dialog with pre-filled settings
+      if (context.mounted) {
+        await ImportDialog.showForFolder(
+          context,
+          scanResult,
+          currentTag: result.assignTag,
+          initialImportAsLink: result.importAsLink,
+        );
+      }
     }
   }
 

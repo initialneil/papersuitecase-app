@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/app_state.dart';
+import '../models/paper_folder.dart';
 import 'paper_card.dart';
+import 'folder_card.dart';
 
 /// Grid of paper cards
 class PaperGrid extends StatefulWidget {
@@ -34,8 +36,10 @@ class _PaperGridState extends State<PaperGrid> {
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     final papers = appState.papers;
+    // Only show folders when we're inside a folder, not in "All Papers" view
+    final folders = appState.selectedFolder != null ? appState.visibleSubFolders : [];
 
-    if (papers.isEmpty) {
+    if (papers.isEmpty && folders.isEmpty) {
       if (appState.isLoading) {
         return const Center(child: CircularProgressIndicator());
       }
@@ -55,6 +59,7 @@ class _PaperGridState extends State<PaperGrid> {
         focusNode: _focusNode,
         autofocus: true,
         child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
           onTap: () {
             appState.deselectAllPapers();
             _focusNode.requestFocus();
@@ -66,37 +71,71 @@ class _PaperGridState extends State<PaperGrid> {
                 6,
               );
 
-              return GridView.builder(
-                padding: const EdgeInsets.all(20),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  childAspectRatio:
-                      0.8, // Adjusted for typical paper card content
-                  crossAxisSpacing: 20,
-                  mainAxisSpacing: 20,
-                ),
-                itemCount: papers.length,
-                itemBuilder: (context, index) {
-                  final paper = papers[index];
-                  return PaperCard(
-                    key: ValueKey(paper.id),
-                    paper: paper,
-                    isSelected: appState.isPaperSelected(paper.id!),
-                    onTap: () {
-                      final isMetaPressed =
-                          HardwareKeyboard.instance.isMetaPressed ||
-                          HardwareKeyboard.instance.isControlPressed;
+              return CustomScrollView(
+                slivers: [
+                  // Folders
+                  if (folders.isNotEmpty)
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                      sliver: SliverGrid(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          childAspectRatio: 2.2, // Short height for folders
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
+                        ),
+                        delegate: SliverChildBuilderDelegate((context, index) {
+                          final folder = folders[index];
+                          return FolderCard(
+                            folder: folder,
+                            onTap: () => appState.selectFolder(folder),
+                            onDoubleTap: () => appState.selectFolder(folder),
+                          );
+                        }, childCount: folders.length),
+                      ),
+                    ),
 
-                      if (isMetaPressed) {
-                        appState.togglePaperSelection(paper.id!);
-                      } else {
-                        appState.selectPaper(paper.id!);
-                      }
-                      _focusNode.requestFocus();
-                    },
-                    onDoubleTap: () => appState.openPaper(paper),
-                  );
-                },
+                  // Spacer
+                  if (folders.isNotEmpty && papers.isNotEmpty)
+                    const SliverToBoxAdapter(child: SizedBox(height: 20)),
+
+                  // Papers
+                  if (papers.isNotEmpty)
+                    SliverPadding(
+                      padding: folders.isNotEmpty
+                          ? const EdgeInsets.fromLTRB(20, 0, 20, 20)
+                          : const EdgeInsets.all(20),
+                      sliver: SliverGrid(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          childAspectRatio: 0.8,
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
+                        ),
+                        delegate: SliverChildBuilderDelegate((context, index) {
+                          final paper = papers[index];
+                          return PaperCard(
+                            key: ValueKey(paper.id),
+                            paper: paper,
+                            isSelected: appState.isPaperSelected(paper.id!),
+                            onTap: () {
+                              final isMetaPressed =
+                                  HardwareKeyboard.instance.isMetaPressed ||
+                                  HardwareKeyboard.instance.isControlPressed;
+
+                              if (isMetaPressed) {
+                                appState.togglePaperSelection(paper.id!);
+                              } else {
+                                appState.selectPaper(paper.id!);
+                              }
+                              _focusNode.requestFocus();
+                            },
+                            onDoubleTap: () => appState.openPaper(paper),
+                          );
+                        }, childCount: papers.length),
+                      ),
+                    ),
+                ],
               );
             },
           ),
@@ -136,14 +175,18 @@ class _EmptyState extends StatelessWidget {
           Icon(
             icon,
             size: 64,
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurface.withValues(alpha: 0.2),
           ),
           const SizedBox(height: 16),
           Text(
             message,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.5),
             ),
           ),
           if (!hasSearch && !hasTagFilter) ...[
@@ -152,7 +195,9 @@ class _EmptyState extends StatelessWidget {
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 border: Border.all(
-                  color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.outline.withValues(alpha: 0.3),
                   width: 2,
                   style: BorderStyle.solid,
                 ),
@@ -165,7 +210,7 @@ class _EmptyState extends StatelessWidget {
                     size: 48,
                     color: Theme.of(
                       context,
-                    ).colorScheme.primary.withOpacity(0.5),
+                    ).colorScheme.primary.withValues(alpha: 0.5),
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -173,7 +218,7 @@ class _EmptyState extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: Theme.of(
                         context,
-                      ).colorScheme.onSurface.withOpacity(0.6),
+                      ).colorScheme.onSurface.withValues(alpha: 0.6),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -182,7 +227,7 @@ class _EmptyState extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(
                         context,
-                      ).colorScheme.onSurface.withOpacity(0.4),
+                      ).colorScheme.onSurface.withValues(alpha: 0.4),
                     ),
                   ),
                 ],

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/import_data.dart';
 import '../models/tag.dart';
+import '../models/paper_folder.dart';
 import '../providers/app_state.dart';
 
 /// Universal import confirmation dialog
@@ -12,6 +13,7 @@ class ImportDialog extends StatefulWidget {
   final FolderScanResult? folderScanResult;
   final ArxivMetadata? arxivMetadata;
   final Tag? currentTag;
+  final bool initialImportAsLink;
 
   const ImportDialog({
     super.key,
@@ -20,6 +22,7 @@ class ImportDialog extends StatefulWidget {
     this.folderScanResult,
     this.arxivMetadata,
     this.currentTag,
+    this.initialImportAsLink = false,
   });
 
   /// Show dialog for PDF file import
@@ -58,6 +61,7 @@ class ImportDialog extends StatefulWidget {
     BuildContext context,
     FolderScanResult scanResult, {
     Tag? currentTag,
+    bool initialImportAsLink = false,
   }) async {
     return showDialog<bool>(
       context: context,
@@ -66,6 +70,7 @@ class ImportDialog extends StatefulWidget {
         importType: ImportType.folder,
         folderScanResult: scanResult,
         currentTag: currentTag,
+        initialImportAsLink: initialImportAsLink,
       ),
     );
   }
@@ -95,19 +100,84 @@ class _ImportDialogState extends State<ImportDialog> {
   late List<PendingImport> _files;
   List<PendingImport> _existingFiles = [];
   bool _useFolderTags = true;
+  bool _createParentFolder = true;
   bool _applyCurrentTag = false;
+  bool _importAsLink = false;
+  int? _selectedFolderId;
   final Set<String> _additionalTags = {};
   final TextEditingController _tagController = TextEditingController();
   List<Tag> _allTags = [];
+  List<Tag> _suggestedTags = [];
+  String _searchQuery = '';
   bool _isLoading = false;
+  Map<int, String> _tagIdToFullPath = {}; // Cache for tag full paths
 
   @override
   void initState() {
     super.initState();
+    // Default to ROOT for folders, or selected folder for files?
+    // User requested "when drag folder inside, always default location to root"
+    // We will default to Root (null) generally if it is a folder scan
+    final appState = context.read<AppState>();
+
+    if (widget.importType == ImportType.folder) {
+      _selectedFolderId = null;
+    } else {
+      _selectedFolderId = appState.selectedFolder?.id;
+    }
+
+    _importAsLink = widget.initialImportAsLink;
+
     _initializeFiles();
     _loadTags();
+    _tagController.addListener(_onSearchChanged);
     // Defer check to next frame to allow context access if needed, though read works
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkDuplicates());
+  }
+
+  void _onSearchChanged() {
+    setState(() {
+      _searchQuery = _tagController.text.toLowerCase();
+      _updateSuggestions();
+    });
+  }
+
+  void _updateSuggestions() {
+    if (_searchQuery.isEmpty) {
+      // Show unselected tags, limited to first 15
+      final seenPaths = <String>{};
+      _suggestedTags = _allTags
+          .where((tag) {
+            final fullPath = _tagIdToFullPath[tag.id] ?? tag.name;
+            if (_additionalTags.contains(fullPath) ||
+                seenPaths.contains(fullPath)) {
+              return false;
+            }
+            seenPaths.add(fullPath);
+            return true;
+          })
+          .take(15)
+          .toList();
+    } else {
+      // Fuzzy search: match tags containing the search query
+      final seenPaths = <String>{};
+      _suggestedTags = _allTags
+          .where((tag) {
+            final tagLower = tag.name.toLowerCase();
+            final fullPath = _tagIdToFullPath[tag.id] ?? tag.name;
+            if (_additionalTags.contains(fullPath) ||
+                seenPaths.contains(fullPath)) {
+              return false;
+            }
+            if (tagLower.contains(_searchQuery)) {
+              seenPaths.add(fullPath);
+              return true;
+            }
+            return false;
+          })
+          .take(15)
+          .toList();
+    }
   }
 
   void _initializeFiles() {
@@ -152,7 +222,21 @@ class _ImportDialogState extends State<ImportDialog> {
   Future<void> _loadTags() async {
     final appState = context.read<AppState>();
     _allTags = await appState.getAllTags();
+    await _buildTagPathCache();
+    _updateSuggestions();
     setState(() {});
+  }
+
+  /// Build cache of tag ID to full hierarchical path (e.g., "A/B")
+  Future<void> _buildTagPathCache() async {
+    final appState = context.read<AppState>();
+    for (final tag in _allTags) {
+      if (tag.id != null) {
+        final ancestors = await appState.getTagAncestors(tag.id!);
+        final fullPath = ancestors.map((t) => t.name).join('/');
+        _tagIdToFullPath[tag.id!] = fullPath;
+      }
+    }
   }
 
   void _addTag(String tagName) {
@@ -161,6 +245,17 @@ class _ImportDialogState extends State<ImportDialog> {
     setState(() {
       _additionalTags.add(tagName.trim());
       _tagController.clear();
+      _updateSuggestions();
+    });
+  }
+
+  void _addExistingTag(Tag tag) {
+    setState(() {
+      // Add full hierarchical path instead of just tag name
+      final fullPath = _tagIdToFullPath[tag.id] ?? tag.name;
+      _additionalTags.add(fullPath);
+      _tagController.clear();
+      _updateSuggestions();
     });
   }
 
@@ -201,6 +296,19 @@ class _ImportDialogState extends State<ImportDialog> {
     final appState = context.read<AppState>();
 
     try {
+      // Resolve target folder
+      int? targetFolderId = _selectedFolderId;
+
+      if (widget.importType == ImportType.folder &&
+          _createParentFolder &&
+          widget.folderScanResult != null) {
+        targetFolderId = await appState.createFolder(
+          widget.folderScanResult!.folderName,
+          path: widget.folderScanResult!.folderPath,
+          isSymbolic: _importAsLink,
+        );
+      }
+
       if (widget.importType == ImportType.arxiv &&
           widget.arxivMetadata != null) {
         // arXiv import
@@ -212,7 +320,11 @@ class _ImportDialogState extends State<ImportDialog> {
         }
         tags.addAll(_additionalTags);
 
-        await appState.importFromArxiv(widget.arxivMetadata!.arxivId, tags);
+        await appState.importFromArxiv(
+          widget.arxivMetadata!.arxivId,
+          tags,
+          folderId: targetFolderId,
+        );
       } else {
         // File/folder import
         // Combine both lists for import
@@ -220,10 +332,15 @@ class _ImportDialogState extends State<ImportDialog> {
         for (final file in allFiles) {
           if (file.isSelected) {
             file.assignedTags = _getTagsForFile(file);
+            file.asLink = _importAsLink;
           }
         }
 
-        await appState.importPapers(allFiles, _useFolderTags);
+        await appState.importPapers(
+          allFiles,
+          _useFolderTags,
+          folderId: targetFolderId,
+        );
       }
 
       if (mounted) {
@@ -352,7 +469,9 @@ class _ImportDialogState extends State<ImportDialog> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.error.withOpacity(0.1),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.error.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
@@ -377,7 +496,7 @@ class _ImportDialogState extends State<ImportDialog> {
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(
                           context,
-                        ).colorScheme.onSurface.withOpacity(0.7),
+                        ).colorScheme.onSurface.withValues(alpha: 0.7),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -419,10 +538,14 @@ class _ImportDialogState extends State<ImportDialog> {
                   ? '${metadata.abstract.substring(0, 300)}...'
                   : metadata.abstract,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.7),
               ),
             ),
           ],
+          const SizedBox(height: 16),
+          _buildLocationSelector(),
         ],
       ),
     );
@@ -447,7 +570,9 @@ class _ImportDialogState extends State<ImportDialog> {
             Text(
               '${scanResult.fileCount} PDF files discovered',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -455,12 +580,32 @@ class _ImportDialogState extends State<ImportDialog> {
         const SizedBox(height: 16),
         _buildSplitFileList(),
         const SizedBox(height: 16),
+        _buildLocationSelector(),
+        CheckboxListTile(
+          value: _createParentFolder,
+          onChanged: (value) =>
+              setState(() => _createParentFolder = value ?? true),
+          title: Text('Create folder "${scanResult.folderName}"'),
+          subtitle: const Text('Group imported papers into this folder'),
+          controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: EdgeInsets.zero,
+        ),
         CheckboxListTile(
           value: _useFolderTags,
           onChanged: (value) => setState(() => _useFolderTags = value ?? true),
           title: const Text('Use folder names as tags'),
           subtitle: const Text(
             'Creates tag hierarchy matching folder structure',
+          ),
+          controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          value: _importAsLink,
+          onChanged: (value) => setState(() => _importAsLink = value ?? false),
+          title: const Text('Link only (do not copy files)'),
+          subtitle: const Text(
+            'Keep files in original location and create symbolic references',
           ),
           controlAffinity: ListTileControlAffinity.leading,
           contentPadding: EdgeInsets.zero,
@@ -480,6 +625,18 @@ class _ImportDialogState extends State<ImportDialog> {
           ),
         const SizedBox(height: 8),
         _buildSplitFileList(),
+        const SizedBox(height: 16),
+        _buildLocationSelector(),
+        CheckboxListTile(
+          value: _importAsLink,
+          onChanged: (value) => setState(() => _importAsLink = value ?? false),
+          title: const Text('Link only (do not copy files)'),
+          subtitle: const Text(
+            'Keep files in original location and create symbolic references',
+          ),
+          controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: EdgeInsets.zero,
+        ),
       ],
     );
   }
@@ -572,7 +729,7 @@ class _ImportDialogState extends State<ImportDialog> {
       ), // Increased height for better view
       decoration: BoxDecoration(
         border: Border.all(
-          color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+          color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
         ),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -650,97 +807,8 @@ class _ImportDialogState extends State<ImportDialog> {
           const SizedBox(height: 8),
         ],
 
-        // Additional tags
-        Text(
-          'Additional tags:',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-          ),
-        ),
-        const SizedBox(height: 8),
-
-        // Tag input with autocomplete
-        Autocomplete<Tag>(
-          optionsBuilder: (textEditingValue) {
-            if (textEditingValue.text.isEmpty) {
-              return const Iterable<Tag>.empty();
-            }
-            return _allTags.where(
-              (tag) => tag.name.toLowerCase().contains(
-                textEditingValue.text.toLowerCase(),
-              ),
-            );
-          },
-          displayStringForOption: (tag) => tag.name,
-          fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-            return Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    focusNode: focusNode,
-                    decoration: InputDecoration(
-                      hintText: 'Type to search or create tags',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      isDense: true,
-                    ),
-                    onSubmitted: (value) {
-                      _addTag(value);
-                      controller.clear();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: () {
-                    _addTag(controller.text);
-                    controller.clear();
-                  },
-                  icon: const Icon(Icons.add),
-                ),
-              ],
-            );
-          },
-          onSelected: (tag) {
-            _addTag(tag.name);
-            // The controller is cleared automatically or kept?
-            // Usually Autocomplete keeps the selected value.
-            // We want to clear it to allow adding more.
-            // We can't easily clear the controller here without access to it.
-            // But _addTag adds it to our list.
-            // If we want to clear the text after selection, we might need a workaround
-            // OR rely on the fact that the user might want to add another.
-            // Let's rely on the user clearing or typing new.
-            // Actually, for a "tag adder", clearing is better.
-            // But we don't have controller ref here.
-
-            // Wait, if I'm using the `_addTag` logic, I'm maintaining `_additionalTags`.
-            // The Autocomplete field is just an input.
-            // If they pick from list, it adds.
-            // If they type and hit enter/plus, it adds.
-
-            // To clear after selection:
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _tagController.clear(); // This _tagController is useless now.
-              // We need a way to clear the Autocomplete's controller.
-              // Since we can't access it here, maybe we shouldn't worry about clearing on selection
-              // OR we use the approach of passing a controller to RawAutocomplete.
-
-              // But for now, let's stick to the FieldViewBuilder fix which solves the "+" button.
-              // Selection clearing is a secondary polish.
-            });
-          },
-        ),
-
-        // Selected tags
+        // Selected tags (displayed above input)
         if (_additionalTags.isNotEmpty) ...[
-          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -754,6 +822,87 @@ class _ImportDialogState extends State<ImportDialog> {
                 ).colorScheme.secondaryContainer,
               );
             }).toList(),
+          ),
+          const SizedBox(height: 8),
+        ],
+
+        // Tag input with add button
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _tagController,
+                decoration: InputDecoration(
+                  hintText: 'Search or create tag...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  isDense: true,
+                ),
+                onSubmitted: (value) {
+                  if (value.trim().isEmpty) return;
+                  // Check if exact match exists (by full path or leaf name)
+                  final valueLower = value.trim().toLowerCase();
+                  final existingTag = _allTags.cast<Tag?>().firstWhere((t) {
+                    if (t == null) return false;
+                    final fullPath = _tagIdToFullPath[t.id] ?? t.name;
+                    return fullPath.toLowerCase() == valueLower ||
+                        t.name.toLowerCase() == valueLower;
+                  }, orElse: () => null);
+                  if (existingTag != null) {
+                    _addExistingTag(existingTag);
+                  } else {
+                    _addTag(value);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filled(
+              onPressed: () {
+                final value = _tagController.text.trim();
+                if (value.isEmpty) return;
+                // Check if exact match exists (by full path or leaf name)
+                final valueLower = value.toLowerCase();
+                final existingTag = _allTags.cast<Tag?>().firstWhere((t) {
+                  if (t == null) return false;
+                  final fullPath = _tagIdToFullPath[t.id] ?? t.name;
+                  return fullPath.toLowerCase() == valueLower ||
+                      t.name.toLowerCase() == valueLower;
+                }, orElse: () => null);
+                if (existingTag != null) {
+                  _addExistingTag(existingTag);
+                } else {
+                  _addTag(value);
+                }
+              },
+              icon: const Icon(Icons.add),
+            ),
+          ],
+        ),
+
+        // Tag suggestions (up to 3 lines)
+        if (_suggestedTags.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            constraints: const BoxConstraints(maxHeight: 100),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _suggestedTags.map((tag) {
+                final fullPath = _tagIdToFullPath[tag.id] ?? tag.name;
+                return ActionChip(
+                  label: Text(fullPath),
+                  onPressed: () => _addExistingTag(tag),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                );
+              }).toList(),
+            ),
           ),
         ],
       ],
@@ -800,6 +949,49 @@ class _ImportDialogState extends State<ImportDialog> {
                 : Text(buttonText),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLocationSelector() {
+    final appState = context.read<AppState>();
+
+    // Ensure selected ID is valid
+    if (_selectedFolderId != null &&
+        !appState.folders.any((f) => f.id == _selectedFolderId)) {
+      _selectedFolderId = null;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: DropdownButtonFormField<int?>(
+        value: _selectedFolderId,
+        decoration: const InputDecoration(
+          labelText: 'Import Location',
+          border: OutlineInputBorder(),
+          prefixIcon: Icon(Icons.folder_open),
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+        isExpanded: true,
+        items: [
+          const DropdownMenuItem<int?>(
+            value: null,
+            child: Text('Root (No Folder)'),
+          ),
+          ...appState.folders.map(
+            (folder) => DropdownMenuItem(
+              value: folder.id,
+              child: Row(
+                children: [
+                  Icon(folder.isSymbolic ? Icons.link : Icons.folder, size: 16),
+                  const SizedBox(width: 8),
+                  Text(folder.name),
+                ],
+              ),
+            ),
+          ),
+        ],
+        onChanged: (value) => setState(() => _selectedFolderId = value),
       ),
     );
   }

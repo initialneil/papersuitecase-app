@@ -4,6 +4,7 @@ class PendingImport {
   final String fileName;
   final List<String> suggestedTags;
   bool isSelected;
+  bool asLink;
   List<String> assignedTags;
 
   PendingImport({
@@ -11,6 +12,7 @@ class PendingImport {
     required this.fileName,
     List<String>? suggestedTags,
     this.isSelected = true,
+    this.asLink = false,
     List<String>? assignedTags,
   }) : suggestedTags = suggestedTags ?? [],
        assignedTags = assignedTags ?? [];

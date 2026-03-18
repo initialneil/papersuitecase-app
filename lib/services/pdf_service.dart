@@ -19,15 +19,53 @@ class PdfService {
     return _storageDir!;
   }
 
-  /// Copy PDF to app storage and return new path
-  Future<String> importPdf(String sourcePath) async {
+  /// Sanitize string to be used as filename
+  static String sanitizeFilename(String name) {
+    // 1. Remove quotes straight up (e.g. "User's" -> "Users")
+    var sanitized = name.replaceAll(RegExp(r"['" + '"]'), '');
+
+    // 2. Replace other invalid/separator chars with space
+    // / \ : * ? < > | ,
+    sanitized = sanitized.replaceAll(RegExp(r'[\\/:*?<>|,]'), ' ');
+
+    // 3. Collapse multiple spaces
+    sanitized = sanitized.replaceAll(RegExp(r'\s+'), ' ');
+
+    return sanitized.trim();
+  }
+
+  /// Import PDF (copy to app storage or reference as link)
+  Future<String> importPdf(
+    String sourcePath, {
+    String? title,
+    bool asLink = false,
+    String? destinationDirectory,
+  }) async {
     final file = File(sourcePath);
     if (!await file.exists()) {
       throw Exception('PDF file not found: $sourcePath');
     }
 
-    final storageDir = await PdfService.storageDirectory;
-    final fileName = p.basename(sourcePath);
+    if (asLink) {
+      // For symbolic links, we just return the original path
+      return sourcePath;
+    }
+
+    // Determine storage directory: custom destination or default
+    final storageDir =
+        destinationDirectory ?? await PdfService.storageDirectory;
+
+    // Ensure destination exists
+    await Directory(storageDir).create(recursive: true);
+
+    String fileName;
+
+    if (title != null && title.isNotEmpty) {
+      final sanitized = sanitizeFilename(title);
+      fileName = '$sanitized.pdf';
+    } else {
+      fileName = p.basename(sourcePath);
+    }
 
     // Generate unique filename if exists
     var destPath = p.join(storageDir, fileName);
@@ -81,10 +119,15 @@ class PdfService {
       final document = syncfusion.PdfDocument(inputBytes: bytes);
 
       // Try PDF metadata title first
-      final info = document.documentInformation;
-      if (info.title.isNotEmpty) {
-        document.dispose();
-        return info.title;
+      try {
+        final info = document.documentInformation;
+        // ignore: unnecessary_null_comparison
+        if (info != null && info.title != null && info.title.isNotEmpty) {
+          document.dispose();
+          return info.title;
+        }
+      } catch (_) {
+        // Metadata access failed
       }
 
       // Try extracting from first page
@@ -118,9 +161,16 @@ class PdfService {
 
   /// Delete PDF from storage
   Future<void> deletePdf(String filePath) async {
-    final file = File(filePath);
-    if (await file.exists()) {
-      await file.delete();
+    // Only delete files that are inside our storage directory
+    final storageDir = await PdfService.storageDirectory;
+    // Check if filePath is inside storageDir
+    final isManaged = p.isWithin(storageDir, filePath);
+
+    if (isManaged) {
+      final file = File(filePath);
+      if (await file.exists()) {
+        await file.delete();
+      }
     }
   }
 
@@ -196,7 +246,21 @@ class PdfService {
         return thumbPath;
       }
 
-      final document = await PdfDocument.openFile(pdfPath);
+      PdfDocument document;
+      try {
+        document = await PdfDocument.openFile(pdfPath);
+      } catch (e) {
+        // Fallback to reading bytes (fixes sandbox permission issues for linked files)
+        try {
+          print('openFile failed, trying openData fallback for: $pdfPath');
+          final bytes = await File(pdfPath).readAsBytes();
+          document = await PdfDocument.openData(bytes);
+        } catch (e) {
+          print('Fallback thumbnail generation failed: $e');
+          rethrow; // Rethrow to be caught by outer catch
+        }
+      }
+
       final page = await document.getPage(1); // 1-indexed
 
       // Calculate dimensions maintaining aspect ratio with width 300
