@@ -1,24 +1,25 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io';
-import '../models/settings_enums.dart';
-
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
+import '../models/settings_enums.dart';
 import '../database/database_service.dart';
 import '../models/paper.dart';
 import '../models/tag.dart';
+import '../models/entry.dart';
 import '../services/pdf_service.dart';
 import '../services/arxiv_service.dart';
+import '../services/entry_scanner_service.dart';
+import '../services/manifest_service.dart';
 
 class _NavigationState {
   final Tag? tag;
-  final PaperFolder? folder;
+  final int? entryId;
+  final String? subfolder;
   final String query;
 
-  _NavigationState(this.tag, this.folder, this.query);
+  _NavigationState(this.tag, this.entryId, this.subfolder, this.query);
 
   @override
   bool operator ==(Object other) =>
@@ -26,12 +27,12 @@ class _NavigationState {
       other is _NavigationState &&
           runtimeType == other.runtimeType &&
           tag?.id == other.tag?.id &&
-          folder?.id == other.folder?.id &&
-          folder?.path == other.folder?.path &&
+          entryId == other.entryId &&
+          subfolder == other.subfolder &&
           query == other.query;
 
   @override
-  int get hashCode => Object.hash(tag?.id, folder?.id, folder?.path, query);
+  int get hashCode => Object.hash(tag?.id, entryId, subfolder, query);
 }
 
 /// Main application state provider
@@ -39,16 +40,16 @@ class AppState extends ChangeNotifier {
   final DatabaseService _db = DatabaseService();
   final PdfService _pdfService = PdfService();
   final ArxivService _arxivService = ArxivService();
-  final FolderImportService _folderImportService = FolderImportService();
+  late final EntryScannerService _scannerService;
 
   // State
   List<Paper> _papers = [];
   List<Tag> _tagTree = [];
-  List<PaperFolder> _folders = [];
-  List<PaperFolder> _folderTree = [];
+  List<Entry> _entries = [];
   List<Tag> _relatedTags = [];
   Tag? _selectedTag;
-  PaperFolder? _selectedFolder;
+  Entry? _selectedEntry;
+  String? _selectedSubfolder;
   List<Tag> _lastActiveTagPath = [];
   String _searchQuery = '';
 
@@ -59,18 +60,11 @@ class AppState extends ChangeNotifier {
 
   bool _isLoading = false;
   String? _error;
-  String? _detectedArxivUrl;
   final Set<int> _selectedPaperIds = {};
   Paper? _viewingPaper;
   int _untaggedCount = 0;
   // Open embedded viewer tabs (MRU order)
   final List<Paper> _openTabs = [];
-
-  // Import State
-  bool _isImporting = false;
-  String _importStatus = '';
-  double _importProgress = 0.0;
-  List<Map<String, dynamic>> _importHistory = [];
 
   // Config State
   bool _isConfigMode = false;
@@ -82,38 +76,19 @@ class AppState extends ChangeNotifier {
   // Getters
   List<Paper> get papers => _papers;
   List<Tag> get tagTree => _tagTree;
-  List<PaperFolder> get folders => _folders;
-  List<PaperFolder> get folderTree => _folderTree;
-
-  /// Get visible subfolders for the current view
-  List<PaperFolder> get visibleSubFolders {
-    if (_selectedFolder == null) {
-      // Root view: show top-level folders
-      return _folderTree;
-    }
-    // Sub-folder view: show children of selected
-    return _selectedFolder!.children;
-  }
-
+  List<Entry> get entries => _entries;
   List<Tag> get relatedTags => _relatedTags;
   Tag? get selectedTag => _selectedTag;
-  PaperFolder? get selectedFolder => _selectedFolder;
+  Entry? get selectedEntry => _selectedEntry;
+  String? get selectedSubfolder => _selectedSubfolder;
   List<Tag> get lastActiveTagPath => _lastActiveTagPath;
   String get searchQuery => _searchQuery;
   bool get isLoading => _isLoading;
   String? get error => _error;
-  String? get detectedArxivUrl => _detectedArxivUrl;
   Set<int> get selectedPaperIds => _selectedPaperIds;
-  bool get isOthersSelected => false; // Removed Others selection logic
   Paper? get viewingPaper => _viewingPaper;
   int get untaggedCount => _untaggedCount;
   List<Paper> get openTabs => List.unmodifiable(_openTabs);
-
-  // Import Getters
-  bool get isImporting => _isImporting;
-  String get importStatus => _importStatus;
-  double get importProgress => _importProgress;
-  List<Map<String, dynamic>> get importHistory => _importHistory;
 
   // Config Getters
   bool get isConfigMode => _isConfigMode;
@@ -133,6 +108,7 @@ class AppState extends ChangeNotifier {
 
     try {
       await DatabaseService.initialize();
+      _scannerService = EntryScannerService(_db, _pdfService);
       await _loadSettings();
       // Push initial state
       _pushHistory();
@@ -151,7 +127,8 @@ class AppState extends ChangeNotifier {
 
     final newState = _NavigationState(
       _selectedTag,
-      _selectedFolder,
+      _selectedEntry?.id,
+      _selectedSubfolder,
       _searchQuery,
     );
 
@@ -167,10 +144,6 @@ class AppState extends ChangeNotifier {
 
     _history.add(newState);
     _historyIndex = _history.length - 1;
-
-    // Notify listeners so UI updates back/forward buttons
-    // However, wait until current frame is done potentially?
-    // Actually this is usually called before notifyListeners of the action itself.
   }
 
   Future<void> navigateBack() async {
@@ -181,7 +154,13 @@ class AppState extends ChangeNotifier {
     final state = _history[_historyIndex];
 
     _selectedTag = state.tag;
-    _selectedFolder = state.folder;
+    _selectedEntry = state.entryId != null
+        ? _entries.cast<Entry?>().firstWhere(
+              (e) => e?.id == state.entryId,
+              orElse: () => null,
+            )
+        : null;
+    _selectedSubfolder = state.subfolder;
     _searchQuery = state.query;
 
     await _loadPapers();
@@ -197,7 +176,13 @@ class AppState extends ChangeNotifier {
     final state = _history[_historyIndex];
 
     _selectedTag = state.tag;
-    _selectedFolder = state.folder;
+    _selectedEntry = state.entryId != null
+        ? _entries.cast<Entry?>().firstWhere(
+              (e) => e?.id == state.entryId,
+              orElse: () => null,
+            )
+        : null;
+    _selectedSubfolder = state.subfolder;
     _searchQuery = state.query;
 
     await _loadPapers();
@@ -207,88 +192,39 @@ class AppState extends ChangeNotifier {
 
   /// Refresh all data
   Future<void> refresh() async {
-    await Future.wait([_loadPapers(), _loadTagTree(), _loadFolders()]);
+    await Future.wait([_loadPapers(), _loadTagTree(), _loadEntries()]);
     notifyListeners();
   }
 
   Future<void> _loadPapers() async {
-    // Handle search first, then apply tag/folder filtering if needed
     if (_searchQuery.isNotEmpty) {
       _papers = await _db.searchPapers(_searchQuery);
       _relatedTags = await _db.getRelatedTags(_searchQuery);
-
-      // Apply folder filtering to search results if folder is selected
-      if (_selectedFolder != null) {
-        if (_selectedFolder!.isSymbolic) {
-          // For symbolic folders, only show papers whose file path is under the folder's path
-          final folderPath = _selectedFolder!.path;
-          _papers = _papers.where((paper) {
-            return paper.filePath.startsWith(folderPath);
-          }).toList();
-        } else if (_selectedFolder!.id != null) {
-          // For regular folders, filter by folder_id
-          final folderId = _selectedFolder!.id!;
-          _papers = _papers.where((paper) {
-            return paper.folderId == folderId;
-          }).toList();
-        }
-      }
-      // Apply tag filtering to search results if tag is selected
-      else if (_selectedTag != null) {
-        if (_selectedTag!.isOthers) {
-          // For "Others" tag, only show untagged papers
-          _papers = _papers.where((paper) => paper.tags.isEmpty).toList();
-        } else {
-          // For regular tags, filter by tag ID
-          final tagId = _selectedTag!.id!;
-          _papers = _papers.where((paper) {
-            return paper.tags.any((tag) => tag.id == tagId);
-          }).toList();
-        }
-      }
-    }
-    // No search query - load by tag or folder
-    else if (_selectedTag != null) {
-      if (_selectedTag!.isOthers) {
-        _papers = await _db.getUntaggedPapers();
-      } else {
-        _papers = await _db.getPapersByTag(_selectedTag!.id!);
-      }
-    } else if (_selectedFolder != null) {
-      if (_selectedFolder!.isSymbolic) {
-        // For symbolic folders, mix DB papers with on-disk files
-        // Handle virtual folders (null ID) - they only exist on disk
-        List<Paper> dbPapers = [];
-        if (_selectedFolder!.id != null) {
-          dbPapers = await _db.getPapersByFolder(_selectedFolder!.id!);
-        }
-
-        final diskPapers = await _scanSymbolicFolderPapers(_selectedFolder!);
-
-        // Merge lists, preferring DB papers if paths match
-        final dbPaths = dbPapers.map((p) => p.filePath).toSet();
-        _papers = [
-          ...dbPapers,
-          ...diskPapers.where((p) => !dbPaths.contains(p.filePath)),
-        ];
-
-        // Sort by name or date? Default to addedAt (file mod time for disk papers)
-        _papers.sort((a, b) => b.addedAt.compareTo(a.addedAt));
-      } else {
-        // Regular folder, must have ID
-        if (_selectedFolder!.id != null) {
-          _papers = await _db.getPapersByFolder(_selectedFolder!.id!);
-        } else {
-          _papers = [];
-        }
-      }
-    } else if (_searchQuery.isNotEmpty) {
-      _papers = await _db.searchPapers(_searchQuery);
-      _relatedTags = await _db.getRelatedTags(_searchQuery);
+    } else if (_selectedTag != null && _selectedTag!.isUntagged) {
+      _papers = await _db.getUntaggedPapers(
+        entryId: _selectedEntry?.id,
+      );
+      _relatedTags = [];
+    } else if (_selectedTag != null) {
+      _papers = await _db.getPapersByTag(
+        _selectedTag!.id!,
+        entryId: _selectedEntry?.id,
+      );
+      _relatedTags = [];
+    } else if (_selectedEntry != null && _selectedSubfolder != null) {
+      _papers = await _db.getPapersByEntryAndSubfolder(
+        _selectedEntry!.id!,
+        _selectedSubfolder!,
+      );
+      _relatedTags = [];
+    } else if (_selectedEntry != null) {
+      _papers = await _db.getPapersByEntry(_selectedEntry!.id!);
+      _relatedTags = [];
     } else {
       _papers = await _db.getAllPapers();
       _relatedTags = [];
     }
+
     _untaggedCount = await _db.getUntaggedPaperCount();
     // Clear selection when loading new papers
     _selectedPaperIds.clear();
@@ -298,218 +234,174 @@ class AppState extends ChangeNotifier {
     _tagTree = await _db.getTagTree();
   }
 
-  Future<void> _loadFolders() async {
-    final allFolders = await _db.getAllFolders();
+  Future<void> _loadEntries() async {
+    _entries = await _db.getAllEntries();
 
-    // Fetch all papers to compute counts and previews
-    // This assumes all papers are loaded. For large libraries, efficient DB queries are better.
-    final allPapers = await _db.getAllPapers();
+    // Update paper counts and subfolder counts
+    final counts = await _db.getEntryPaperCounts();
+    for (final entry in _entries) {
+      entry.paperCount = counts[entry.id] ?? 0;
 
-    // Group papers by folder
-    final papersByFolder = <int, List<Paper>>{};
-    for (final paper in allPapers) {
-      if (paper.folderId != null) {
-        papersByFolder.putIfAbsent(paper.folderId!, () => []).add(paper);
-      }
-    }
-
-    // Populate counts and previews
-    for (final folder in allFolders) {
-      if (folder.isSymbolic) {
-        try {
-          // Symbolic folder: scan disk for count and preview
-          // We limit the scan if possible, but _scanSymbolicFolderPapers scans all
-          // We can optimize _scanSymbolicFolderPapers later if needed
-          final diskPapers = await _scanSymbolicFolderPapers(folder);
-          folder.paperCount = diskPapers.length;
-          folder.previewPapers = diskPapers.take(4).toList();
-        } catch (e) {
-          debugPrint('Error scanning symbolic folder ${folder.name}: $e');
+      // Compute subfolder counts from papers
+      if (entry.id != null) {
+        final entryPapers = await _db.getPapersByEntry(entry.id!);
+        final subCounts = <String, int>{};
+        for (final paper in entryPapers) {
+          final dir = p.dirname(paper.filePath);
+          if (dir != '.' && dir.isNotEmpty) {
+            // Get top-level subfolder
+            final parts = p.split(dir);
+            if (parts.isNotEmpty) {
+              final topFolder = parts.first;
+              subCounts[topFolder] = (subCounts[topFolder] ?? 0) + 1;
+            }
+          }
         }
-      } else if (folder.id != null && papersByFolder.containsKey(folder.id)) {
-        final folderPapers = papersByFolder[folder.id]!;
-        folder.paperCount = folderPapers.length;
-        // Take up to 4 papers for preview
-        folder.previewPapers = folderPapers.take(4).toList();
+        entry.subfolderCounts = subCounts;
       }
     }
-
-    _folders = allFolders;
-
-    // Preserve expansion state if possible
-    final expandedIds = _folderTree
-        .expand((f) => [f, ..._getAllDescendants(f)])
-        .where((f) => f.isExpanded)
-        .map((f) => f.id)
-        .toSet();
-
-    _folderTree = _buildFolderTree(allFolders);
-
-    // Restore expansion
-    for (final folder in _folderTree) {
-      await _restoreExpansion(folder, expandedIds);
-    }
-
-    notifyListeners();
   }
 
-  List<PaperFolder> _getAllDescendants(PaperFolder folder) {
-    if (folder.children.isEmpty) return [];
-    return [
-      ...folder.children,
-      ...folder.children.expand((c) => _getAllDescendants(c)),
-    ];
-  }
-
-  Future<void> _restoreExpansion(
-    PaperFolder folder,
-    Set<int?> expandedIds,
-  ) async {
-    if (folder.id != null && expandedIds.contains(folder.id)) {
-      folder.isExpanded = true;
-    }
-
-    if (folder.isExpanded && folder.isSymbolic && folder.children.isEmpty) {
-      await _scanSymbolicFolderChildren(folder);
-    }
-
-    for (final child in folder.children) {
-      await _restoreExpansion(child, expandedIds);
-    }
-  }
-
-  /// Toggle folder expansion
-  Future<void> toggleFolderExpansion(PaperFolder folder) async {
-    folder.isExpanded = !folder.isExpanded;
-    notifyListeners();
-
-    if (folder.isExpanded && folder.isSymbolic && folder.children.isEmpty) {
-      await _scanSymbolicFolderChildren(folder);
-      notifyListeners();
-    }
-  }
-
-  /// Scan symbolic folder for subdirectories and add as virtual children
-  Future<void> _scanSymbolicFolderChildren(PaperFolder folder) async {
-    final subDirs = await FolderImportService.getSubDirectories(folder.path);
-    if (subDirs.isEmpty) return;
-
-    // Get existing children paths to avoid duplicates
-    final existingPaths = folder.children.map((c) => c.path).toSet();
-
-    for (final dir in subDirs) {
-      if (!existingPaths.contains(dir.path)) {
-        final name = p.basename(dir.path);
-        // Create virtual folder
-        final child = PaperFolder(
-          parentId: folder.id,
-          path: dir.path,
-          name: name,
-          isSymbolic: true,
-          children: [],
-        );
-
-        // Populate stats for the child
-        try {
-          final diskPapers = await _scanSymbolicFolderPapers(child);
-          child.paperCount = diskPapers.length;
-          child.previewPapers = diskPapers.take(4).toList();
-        } catch (e) {
-          debugPrint('Error scanning subfolder $name: $e');
-        }
-
-        folder.children.add(child);
-      }
-    }
-
-    // Sort children by name (directories first usually, but here all are dirs)
-    folder.children.sort(
-      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-    );
-  }
-
-  /// Scan symbolic folder for PDF files and return as transient Paper objects
-  Future<List<Paper>> _scanSymbolicFolderPapers(PaperFolder folder) async {
-    final dir = Directory(folder.path);
-    if (!await dir.exists()) return [];
-
-    try {
-      final entities = await dir.list().toList();
-      final pdfFiles = entities
-          .whereType<File>()
-          .where((f) => p.extension(f.path).toLowerCase() == '.pdf')
-          .toList();
-
-      return pdfFiles.map((file) {
-        final stat = file.statSync();
-        final name = p.basename(file.path);
-        // Remove extension for title
-        final title = p.basenameWithoutExtension(file.path);
-
-        return Paper(
-          id: -1 * (name.hashCode.abs()), // Negative ID for transient papers
-          title: title,
-          filePath: file.path,
-          addedAt: stat.modified,
-          isSymbolicLink: true,
-          folderId: folder.id, // Associate with current parent
-        );
-      }).toList();
-    } catch (e) {
-      print('Error scanning papers in ${folder.path}: $e');
-      return [];
-    }
-  }
-
-  /// Build hierarchical tree from flat folder list
-  List<PaperFolder> _buildFolderTree(List<PaperFolder> allFolders) {
-    // Map of ID -> List of Children
-    final childrenMap = <int, List<PaperFolder>>{};
-    for (final folder in allFolders) {
-      if (folder.parentId != null) {
-        childrenMap.putIfAbsent(folder.parentId!, () => []).add(folder);
-      }
-    }
-
-    // Helper to recursively build children
-    List<PaperFolder> buildChildren(int? parentId) {
-      final children = childrenMap[parentId] ?? [];
-      return children.map((folder) {
-        return PaperFolder(
-          id: folder.id,
-          parentId: folder.parentId,
-          path: folder.path,
-          name: folder.name,
-          isSymbolic: folder.isSymbolic,
-          addedAt: folder.addedAt,
-          children: buildChildren(folder.id),
-        );
-      }).toList();
-    }
-
-    // Return root folders (those with parentId == null)
-    return allFolders
-        .where((f) => f.parentId == null)
-        .map(
-          (f) => PaperFolder(
-            id: f.id,
-            parentId: f.parentId,
-            path: f.path,
-            name: f.name,
-            isSymbolic: f.isSymbolic,
-            addedAt: f.addedAt,
-            children: buildChildren(f.id),
-          ),
-        )
-        .toList();
-  }
-
-  /// Get untagged paper count for "Others" category
+  /// Get untagged paper count
   Future<int> getUntaggedCount() async {
     return await _db.getUntaggedPaperCount();
   }
 
-  // Config Methods
+  // ==================== Entry Management ====================
+
+  /// Add a new entry (folder reference)
+  Future<void> addEntry(String folderPath) async {
+    try {
+      // Check if entry already exists
+      final existing = await _db.getEntryByPath(folderPath);
+      if (existing != null) {
+        _error = 'Entry already exists for this folder';
+        notifyListeners();
+        return;
+      }
+
+      final name = p.basename(folderPath);
+      final entry = Entry(path: folderPath, name: name);
+      final id = await _db.insertEntry(entry);
+      final insertedEntry = Entry(
+        id: id,
+        path: folderPath,
+        name: name,
+        addedAt: entry.addedAt,
+      );
+
+      // Recover from manifest if available
+      await _scannerService.recoverFromManifest(insertedEntry);
+
+      // Scan for papers
+      await _scannerService.scanEntry(insertedEntry);
+
+      // Process new papers in background
+      await _processNewPapersForEntry(insertedEntry);
+
+      await refresh();
+    } catch (e) {
+      _error = 'Failed to add entry: $e';
+      print(_error);
+      notifyListeners();
+    }
+  }
+
+  /// Remove an entry and all its papers from the database
+  Future<void> removeEntry(int entryId) async {
+    try {
+      // Clear selection if this entry is selected
+      if (_selectedEntry?.id == entryId) {
+        _selectedEntry = null;
+        _selectedSubfolder = null;
+      }
+
+      // Close any open tabs for papers in this entry
+      final entryPapers = await _db.getPapersByEntry(entryId);
+      final entryPaperIds = entryPapers.map((p) => p.id).toSet();
+      _openTabs.removeWhere((tab) => entryPaperIds.contains(tab.id));
+      if (_viewingPaper != null &&
+          entryPaperIds.contains(_viewingPaper!.id)) {
+        _viewingPaper = _openTabs.isNotEmpty ? _openTabs.first : null;
+      }
+
+      // Delete entry (CASCADE will remove papers)
+      await _db.deleteEntry(entryId);
+
+      await refresh();
+    } catch (e) {
+      _error = 'Failed to remove entry: $e';
+      print(_error);
+      notifyListeners();
+    }
+  }
+
+  /// Scan all entries for new, removed, and renamed papers
+  Future<void> scanAllEntries() async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final results = await _scannerService.scanAllEntries();
+
+      // Process new papers in background for each entry
+      final entries = await _db.getAllEntries();
+      for (int i = 0; i < results.length && i < entries.length; i++) {
+        final result = results[i];
+        if (result.newPapers.isNotEmpty) {
+          for (final paper in result.newPapers) {
+            await _scannerService.processNewPaper(paper, entries[i]);
+          }
+        }
+
+        // Update accessibility
+        entries[i].isAccessible = result.entryAccessible;
+      }
+
+      await refresh();
+    } catch (e) {
+      _error = 'Failed to scan entries: $e';
+      print(_error);
+    }
+
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  /// Refresh a single entry by re-scanning it
+  Future<void> refreshEntry(Entry entry) async {
+    try {
+      final result = await _scannerService.scanEntry(entry);
+
+      // Process new papers
+      if (result.newPapers.isNotEmpty) {
+        for (final paper in result.newPapers) {
+          await _scannerService.processNewPaper(paper, entry);
+        }
+      }
+
+      entry.isAccessible = result.entryAccessible;
+
+      await refresh();
+    } catch (e) {
+      _error = 'Failed to refresh entry: $e';
+      print(_error);
+      notifyListeners();
+    }
+  }
+
+  /// Process new papers for an entry (extract text, thumbnails, etc.)
+  Future<void> _processNewPapersForEntry(Entry entry) async {
+    final papers = await _db.getPapersByEntry(entry.id!);
+    for (final paper in papers) {
+      // Only process papers that haven't been processed yet
+      if (paper.extractedText == null || paper.extractedText!.isEmpty) {
+        await _scannerService.processNewPaper(paper, entry);
+      }
+    }
+  }
+
+  // ==================== Config Methods ====================
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
@@ -567,16 +459,15 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('customPdfAppPath', path);
   }
-  // ==================== Selection (Folder/Tag) ====================
 
-  /// Select a tag to filter papers
+  // ==================== Selection (Entry/Tag) ====================
+
+  /// Select a tag to filter papers (co-selection: keeps entry)
   Future<void> selectTag(Tag? tag) async {
     _selectedTag = tag;
-    _selectedFolder = null; // Clear folder selection
     _searchQuery = '';
-    _detectedArxivUrl = null;
 
-    if (tag != null && !tag.isOthers) {
+    if (tag != null && !tag.isUntagged) {
       _lastActiveTagPath = await _db.getTagAncestors(tag.id!);
     } else {
       _lastActiveTagPath = [];
@@ -587,503 +478,128 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Select a folder to filter papers
-  Future<void> selectFolder(PaperFolder folder) async {
-    _selectedFolder = folder;
-    _selectedTag = null; // Clear tag selection
+  /// Select an entry to filter papers (co-selection: keeps tag)
+  Future<void> selectEntry(Entry? entry, {String? subfolder}) async {
+    _selectedEntry = entry;
+    _selectedSubfolder = subfolder;
     _searchQuery = '';
-    _detectedArxivUrl = null;
-    _lastActiveTagPath = []; // Clear tag path
 
     _pushHistory();
     await _loadPapers();
     notifyListeners();
   }
 
-  /// Create a new top-level or sub folder
-  Future<int> createFolder(
-    String name, {
-    bool isSymbolic = false,
-    String? path,
-    int? parentId,
-  }) async {
-    String folderPath = path ?? '';
+  /// Select all papers (clear entry, tag, and search)
+  Future<void> selectAllPapersView() async {
+    _selectedTag = null;
+    _selectedEntry = null;
+    _selectedSubfolder = null;
+    _lastActiveTagPath = [];
+    _searchQuery = '';
 
-    // Create physical directory for non-symbolic folders
-    if (!isSymbolic && (path == null || path.isEmpty)) {
-      String baseDir;
-      if (parentId != null) {
-        // Subfolder: inside parent's path
-        try {
-          final parent = _folders.firstWhere((f) => f.id == parentId);
-          baseDir = parent.path;
-        } catch (_) {
-          baseDir = await PdfService.storageDirectory;
-        }
-      } else {
-        baseDir = await PdfService.storageDirectory;
-      }
-
-      final safeName = PdfService.sanitizeFilename(name);
-      folderPath = p.join(baseDir, safeName);
-
-      final dir = Directory(folderPath);
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
-      }
-    } else if (!isSymbolic && path != null) {
-      // Ensure specific path exists
-      final dir = Directory(path);
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
-      }
-    }
-
-    // Check if folder with same path already exists (to avoid UNIQUE constraint error)
-    // Especially for symbolic links which use the exact external path
-    try {
-      final existingFolders = await _db.getAllFolders();
-      // Simple path check - might need normalization?
-      final existing = existingFolders.cast<PaperFolder?>().firstWhere(
-        (f) => f?.path == folderPath,
-        orElse: () => null,
-      );
-
-      if (existing != null && existing.id != null) {
-        return existing.id!;
-      }
-
-      final id = await _db.insertFolder(
-        PaperFolder(
-          name: name,
-          path: folderPath,
-          isSymbolic: isSymbolic,
-          parentId: parentId,
-        ),
-      );
-      await _loadFolders();
-      return id;
-    } catch (e) {
-      print('Error creating folder: $e');
-      rethrow;
-    }
+    _pushHistory();
+    await _loadPapers();
+    notifyListeners();
   }
 
-  /// Delete a folder
-  Future<void> deleteFolder(PaperFolder folder) async {
-    if (folder.id == null) return;
-
-    // 1. Handle Papers
-    final papersInFolder = await _db.getPapersByFolder(folder.id!);
-
-    if (folder.isSymbolic) {
-      // For symbolic folders, just unlink papers
-      for (final paper in papersInFolder) {
-        await _db.updatePaperFolder(paper.id!, null);
-      }
-    } else {
-      // Real folder: Delete papers and files
-      for (final paper in papersInFolder) {
-        // Delete paper (file and DB)
-        await deletePaper(paper);
-      }
-
-      // Delete physical directory
-      if (folder.path.isNotEmpty) {
-        final dir = Directory(folder.path);
-        if (await dir.exists()) {
-          try {
-            await dir.delete(recursive: true);
-          } catch (e) {
-            debugPrint('Error deleting directory: $e');
-          }
-        }
-      }
-    }
-
-    // 2. Delete Folder DB Entry
-    await _db.deleteFolder(folder.id!);
-
-    // 3. Selection state
-    if (_selectedFolder?.id == folder.id) {
-      _selectedFolder = null;
-      await _loadPapers();
-    }
-    await _loadFolders();
+  /// Toggle entry expansion in sidebar
+  void toggleEntryExpansion(Entry entry) {
+    entry.isExpanded = !entry.isExpanded;
+    notifyListeners();
   }
 
   // ==================== Search ====================
 
   /// Update search query
-  Future<void> search(String query) async {
+  Future<void> setSearchQuery(String query) async {
     _searchQuery = query.trim();
-    _selectedTag = null;
-    // DO NOT clear _lastActiveTagPath here to persist context
-
-    // Check for arXiv URL
-    if (ArxivService.isArxivUrl(_searchQuery)) {
-      _detectedArxivUrl = _searchQuery;
-    } else {
-      _detectedArxivUrl = null;
-    }
 
     if (_searchQuery.isEmpty) {
       _relatedTags = [];
-      await _loadPapers(); // Call _loadPapers to update _papers and _untaggedCount
-    } else if (_detectedArxivUrl == null) {
-      await _loadPapers();
     }
 
-    // Only push history for non-empty search queries
-    if (_searchQuery.isNotEmpty) {
-      _pushHistory();
-    } else {
-      // If cleared, also push history? Or just treat as "root"?
-      // If we go back from search "X" to empty, it should be in history.
-      // But _onSearchChanged debounces, so multiple keystrokes might be an issue.
-      // For now, let's push for empty too if we were previously searching.
-      _pushHistory();
-    }
-
+    _pushHistory();
+    await _loadPapers();
     notifyListeners();
   }
 
   /// Clear search
   Future<void> clearSearch() async {
     _searchQuery = '';
-    _detectedArxivUrl = null;
     _pushHistory();
     await _loadPapers();
     notifyListeners();
   }
 
-  /// Clear all selection (Tag/Folder/Search)
+  /// Clear all selection (Tag/Entry/Search)
   Future<void> clearSelection() async {
     _selectedTag = null;
-    _selectedFolder = null;
+    _selectedEntry = null;
+    _selectedSubfolder = null;
     _lastActiveTagPath = [];
     _searchQuery = '';
-    _detectedArxivUrl = null;
 
     _pushHistory();
     await _loadPapers();
     notifyListeners();
   }
 
-  // ==================== Paper Import ====================
+  // ==================== Paper Management ====================
 
-  /// Import papers with assigned tags
-  Future<List<Paper>> importPapers(
-    List<PendingImport> pendingImports,
-    bool useFolderTags, {
-    int? folderId,
-  }) async {
-    // Fire and forget (background import)
-    // We return empty list immediately so UI doesn't block
-    _processImports(pendingImports, useFolderTags, folderId: folderId);
-    return [];
+  /// Update paper
+  Future<void> updatePaper(Paper paper) async {
+    await _db.updatePaper(paper);
+    await refresh();
   }
 
-  Future<void> _processImports(
-    List<PendingImport> pendingImports,
-    bool useFolderTags, {
-    int? folderId,
-  }) async {
-    _isImporting = true;
-    _importProgress = 0.0;
-    _importStatus = 'Starting import...';
-    notifyListeners();
-
-    // Resolve target directory
-    String? targetDirectory;
-    if (folderId != null) {
-      try {
-        final folder = _folders.firstWhere((f) => f.id == folderId);
-        targetDirectory = folder.path;
-      } catch (_) {}
-    }
-
-    final totalCount = pendingImports.where((p) => p.isSelected).length;
-    int processedCount = 0;
-
+  /// Remove a paper from the DB, manifest, and cache. Never deletes from disk.
+  Future<void> removePaper(Paper paper) async {
     try {
-      for (final pending in pendingImports) {
-        if (!pending.isSelected) continue;
-
-        processedCount++;
-        _importProgress = processedCount / totalCount;
-        _importStatus =
-            'Importing ${processedCount}/${totalCount}: ${pending.fileName}';
-        notifyListeners();
-
-        try {
-          // Extract title first to use as filename
-          final title = await _pdfService.extractTitle(pending.sourcePath);
-
-          // Copy PDF to storage
-          final storedPath = await _pdfService.importPdf(
-            pending.sourcePath,
-            title: title,
-            asLink: pending.asLink,
-            destinationDirectory: targetDirectory,
+      // Find the entry for this paper
+      final entry = _entries.cast<Entry?>().firstWhere(
+            (e) => e?.id == paper.entryId,
+            orElse: () => null,
           );
 
-          // Extract text
-          final text = await _pdfService.extractText(storedPath);
+      // Remove from DB
+      await _db.deletePaper(paper.id!);
 
-          // Create paper record
-          final paperId = await _db.insertPaper(
-            Paper(
-              title: title,
-              filePath: storedPath,
-              extractedText: text,
-              isSymbolicLink: pending.asLink,
-              folderId: folderId,
-            ),
-          );
+      // Remove from manifest and cache if entry exists
+      if (entry != null) {
+        await ManifestService.removePaperFromManifest(
+            entry.path, paper.filePath);
+        await ManifestService.deleteThumbnail(entry.path, paper.filePath);
+        await ManifestService.deleteTextCache(entry.path, paper.filePath);
+      }
 
-          // Create/get tags and associate
-          final tagIds = <int>{};
-
-          // Handle folder hierarchy if enabled
-          final folderTagNames = <String>{};
-          if (useFolderTags && pending.suggestedTags.isNotEmpty) {
-            int? parentId;
-            for (final tagName in pending.suggestedTags) {
-              final tag = await _db.getOrCreateTag(tagName, parentId: parentId);
-              parentId = tag.id;
-              tagIds.add(tag.id!);
-              folderTagNames.add(tagName);
-            }
-          }
-
-          // Handle other tags (manual/context)
-          for (final tagName in pending.assignedTags) {
-            // Skip tags that were already handled as part of the folder hierarchy
-            if (folderTagNames.contains(tagName)) continue;
-
-            // Parse hierarchical paths like "A/B" into parent-child structure
-            final tagId = await _getOrCreateTagFromPath(tagName);
-            tagIds.add(tagId);
-          }
-
-          await _db.setTagsForPaper(paperId, tagIds.toList());
-
-          _addImportHistory(title, true, 'Successfully imported');
-
-          // Refresh tag tree and paper counts to show progress in UI live
-          await _loadTagTree();
-          _untaggedCount = await _db.getUntaggedPaperCount();
-          notifyListeners();
-        } catch (e) {
-          print('Error importing ${pending.fileName}: $e');
-          _addImportHistory(pending.fileName, false, 'Error: $e');
-        }
+      // Close tab if open
+      _openTabs.removeWhere((p) => p.id == paper.id);
+      if (_viewingPaper?.id == paper.id) {
+        _viewingPaper = _openTabs.isNotEmpty ? _openTabs.first : null;
       }
 
       await refresh();
     } catch (e) {
-      _error = 'Import process failed: $e';
+      _error = 'Failed to remove paper: $e';
       print(_error);
+      notifyListeners();
     }
-
-    _isImporting = false;
-    _importStatus = '';
-    notifyListeners();
-  }
-
-  /// Import from arXiv URL
-  Future<Paper?> importFromArxiv(
-    String urlOrId,
-    List<String> tagNames, {
-    int? folderId,
-  }) async {
-    _isLoading = true;
-    _isImporting = true;
-    _importProgress = 0.0;
-    _importStatus = 'Starting import...';
-    notifyListeners();
-
-    String? arxivId;
-
-    try {
-      arxivId = ArxivService.parseArxivId(urlOrId);
-      if (arxivId == null) {
-        _error = 'Invalid arXiv URL or ID';
-        _addImportHistory(urlOrId, false, 'Invalid arXiv URL or ID');
-        _isLoading = false;
-        _isImporting = false;
-        notifyListeners();
-        return null;
-      }
-
-      // Fetch metadata
-      _importStatus = 'Fetching metadata from arXiv...';
-      _importProgress = 0.2;
-      notifyListeners();
-
-      final metadata = await _arxivService.fetchMetadata(arxivId);
-      if (metadata == null) {
-        _error = 'Could not fetch arXiv metadata';
-        _addImportHistory(arxivId, false, 'Failed to fetch metadata');
-        _isLoading = false;
-        _isImporting = false;
-        notifyListeners();
-        return null;
-      }
-
-      // Download PDF
-      _importStatus = 'Downloading PDF: ${metadata.title}';
-      _importProgress = 0.4;
-      notifyListeners();
-
-      final tempPath = await _arxivService.downloadPdf(arxivId);
-      if (tempPath == null) {
-        _error = 'Could not download PDF';
-        _addImportHistory(metadata.title, false, 'Failed to download PDF');
-        _isLoading = false;
-        _isImporting = false;
-        notifyListeners();
-        return null;
-      }
-
-      // Resolve target directory
-      String? targetDirectory;
-      if (folderId != null) {
-        try {
-          final folder = _folders.firstWhere((f) => f.id == folderId);
-          targetDirectory = folder.path;
-        } catch (_) {}
-      }
-
-      // Import PDF
-      _importStatus = 'Processing PDF...';
-      _importProgress = 0.6;
-      notifyListeners();
-
-      final storedPath = await _pdfService.importPdf(
-        tempPath,
-        title: metadata.title,
-        destinationDirectory: targetDirectory,
-      );
-
-      _importStatus = 'Extracting text...';
-      _importProgress = 0.8;
-      notifyListeners();
-
-      final extractedText = await _pdfService.extractText(storedPath);
-
-      // Create paper record
-      final paperId = await _db.insertPaper(
-        Paper(
-          title: metadata.title,
-          filePath: storedPath,
-          arxivId: arxivId,
-          authors: metadata.authors,
-          abstract: metadata.abstract,
-          extractedText: extractedText,
-          arxivUrl: 'https://arxiv.org/abs/$arxivId',
-          folderId: folderId,
-        ),
-      );
-
-      // Create/get tags and associate
-      final tagIds = <int>[];
-      for (final tagName in tagNames) {
-        // Parse hierarchical paths like "A/B" into parent-child structure
-        final tagId = await _getOrCreateTagFromPath(tagName);
-        tagIds.add(tagId);
-      }
-      await _db.setTagsForPaper(paperId, tagIds);
-
-      // Clear detected URL
-      _detectedArxivUrl = null;
-      _searchQuery = '';
-
-      _importStatus = 'Finalizing...';
-      _importProgress = 0.95;
-      notifyListeners();
-
-      await refresh();
-
-      final tags = await _db.getTagsForPaper(paperId);
-      final paper = Paper(
-        id: paperId,
-        title: metadata.title,
-        filePath: storedPath,
-        arxivId: arxivId,
-        authors: metadata.authors,
-        abstract: metadata.abstract,
-        extractedText: extractedText,
-        arxivUrl: 'https://arxiv.org/abs/$arxivId',
-        tags: tags,
-      );
-
-      _importStatus = 'Import complete!';
-      _importProgress = 1.0;
-      _addImportHistory(metadata.title, true, 'Successfully imported');
-
-      // Clear import state after a brief delay
-      Future.delayed(const Duration(seconds: 2), () {
-        _isImporting = false;
-        _importStatus = '';
-        _importProgress = 0.0;
-        notifyListeners();
-      });
-
-      _isLoading = false;
-      notifyListeners();
-      return paper;
-    } catch (e) {
-      _error = 'arXiv import failed: $e';
-      _addImportHistory(arxivId ?? urlOrId, false, 'Error: $e');
-      print(_error);
-    }
-
-    _isLoading = false;
-    _isImporting = false;
-    _importStatus = '';
-    _importProgress = 0.0;
-    notifyListeners();
-    return null;
-  }
-
-  void _addImportHistory(String title, bool success, String message) {
-    _importHistory.insert(0, {
-      'title': title,
-      'success': success,
-      'message': message,
-      'timestamp': DateTime.now(),
-    });
-    // Keep only last 50 imports
-    if (_importHistory.length > 50) {
-      _importHistory.removeLast();
-    }
-  }
-
-  /// Scan folder for import preview
-  Future<FolderScanResult?> scanFolder(String folderPath) async {
-    try {
-      return await _folderImportService.scanFolder(folderPath);
-    } catch (e) {
-      _error = 'Folder scan failed: $e';
-      print(_error);
-      return null;
-    }
-  }
-
-  /// Fetch arXiv metadata for preview
-  Future<ArxivMetadata?> fetchArxivMetadata(String urlOrId) async {
-    final arxivId = ArxivService.parseArxivId(urlOrId);
-    if (arxivId == null) return null;
-    return await _arxivService.fetchMetadata(arxivId);
   }
 
   /// Rebuild title for a paper by extracting from PDF
   Future<void> rebuildPaperTitle(int paperId) async {
     try {
       final paper = _papers.firstWhere((p) => p.id == paperId);
-      final newTitle = await _pdfService.extractTitle(paper.filePath);
+
+      // Resolve full path via entry
+      final entry = _entries.cast<Entry?>().firstWhere(
+            (e) => e?.id == paper.entryId,
+            orElse: () => null,
+          );
+      if (entry == null) return;
+
+      final fullPath = p.join(entry.path, paper.filePath);
+      final newTitle = await _pdfService.extractTitle(fullPath);
 
       if (newTitle.isNotEmpty) {
         await _db.updatePaper(paper.copyWith(title: newTitle));
@@ -1096,45 +612,85 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Rebuild titles for all papers
-  Future<void> rebuildAllPaperTitles() async {
-    _isLoading = true;
-    _importStatus = 'Rebuilding paper titles...';
-    _importProgress = 0.0;
-    notifyListeners();
+  /// Fetch arXiv metadata for preview
+  Future<ArxivMetadata?> fetchArxivMetadata(String urlOrId) async {
+    final arxivId = ArxivService.parseArxivId(urlOrId);
+    if (arxivId == null) return null;
+    return await _arxivService.fetchMetadata(arxivId);
+  }
 
-    try {
-      final allPapers = await _db.getAllPapers();
-      for (int i = 0; i < allPapers.length; i++) {
-        final paper = allPapers[i];
-        _importStatus = 'Rebuilding: ${paper.title}';
-        _importProgress = (i + 1) / allPapers.length;
-        notifyListeners();
+  /// Open paper with preferred PDF viewer
+  Future<bool> openPaper(Paper paper) async {
+    // Resolve full path via entry
+    final entry = _entries.cast<Entry?>().firstWhere(
+          (e) => e?.id == paper.entryId,
+          orElse: () => null,
+        );
+    final fullPath =
+        entry != null ? p.join(entry.path, paper.filePath) : paper.filePath;
 
-        final newTitle = await _pdfService.extractTitle(paper.filePath);
-        if (newTitle.isNotEmpty && newTitle != paper.title) {
-          await _db.updatePaper(paper.copyWith(title: newTitle));
-        }
-      }
-
-      await refresh();
-      _importStatus = 'Titles rebuilt successfully!';
-      _importProgress = 1.0;
-
-      Future.delayed(const Duration(seconds: 2), () {
-        _importStatus = '';
-        _importProgress = 0.0;
-        notifyListeners();
-      });
-    } catch (e) {
-      _error = 'Failed to rebuild titles: $e';
-      print(_error);
-      _importStatus = '';
-      _importProgress = 0.0;
+    if (_pdfReaderType == PdfReaderType.embedded) {
+      // Maintain MRU open tabs list
+      _openTabs.removeWhere((p) => p.id == paper.id);
+      _openTabs.insert(0, paper);
+      _viewingPaper = paper;
+      _isConfigMode = false;
+      notifyListeners();
+      return true;
+    } else if (_pdfReaderType == PdfReaderType.custom &&
+        _customPdfAppPath != null) {
+      return await PdfService.openWithCustomApp(
+        fullPath,
+        _customPdfAppPath!,
+      );
+    } else {
+      return await PdfService.openWithSystemViewer(fullPath);
     }
+  }
 
-    _isLoading = false;
+  /// Close embedded viewer
+  void closePaperViewer() {
+    _viewingPaper = null;
     notifyListeners();
+  }
+
+  /// Switch to an already-open tab (or add if missing)
+  void switchToTab(Paper paper) {
+    _openTabs.removeWhere((p) => p.id == paper.id);
+    _openTabs.insert(0, paper);
+    _viewingPaper = paper;
+    _isConfigMode = false;
+    notifyListeners();
+  }
+
+  /// Close a specific open tab
+  void closeTab(Paper paper) {
+    final closingCurrent = _viewingPaper?.id == paper.id;
+    _openTabs.removeWhere((p) => p.id == paper.id);
+    if (closingCurrent) {
+      _viewingPaper = _openTabs.isNotEmpty ? _openTabs.first : null;
+    }
+    notifyListeners();
+  }
+
+  /// Reveal paper in Finder
+  Future<bool> revealPaperInFinder(Paper paper) async {
+    final entry = _entries.cast<Entry?>().firstWhere(
+          (e) => e?.id == paper.entryId,
+          orElse: () => null,
+        );
+    final fullPath =
+        entry != null ? p.join(entry.path, paper.filePath) : paper.filePath;
+    return await PdfService.revealInFinder(fullPath);
+  }
+
+  /// Resolve full file path for a paper
+  String resolveFullPath(Paper paper) {
+    final entry = _entries.cast<Entry?>().firstWhere(
+          (e) => e?.id == paper.entryId,
+          orElse: () => null,
+        );
+    return entry != null ? p.join(entry.path, paper.filePath) : paper.filePath;
   }
 
   // ==================== Tag Management ====================
@@ -1203,8 +759,8 @@ class AppState extends ChangeNotifier {
     // Split by '/' and create hierarchy
     final parts = tagPath
         .split('/')
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty)
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
         .toList();
     if (parts.isEmpty) {
       throw ArgumentError('Invalid tag path: $tagPath');
@@ -1252,76 +808,6 @@ class AppState extends ChangeNotifier {
     await refresh();
   }
 
-  // ==================== Paper Management ====================
-
-  /// Update paper
-  Future<void> updatePaper(Paper paper) async {
-    await _db.updatePaper(paper);
-    await refresh();
-  }
-
-  /// Delete a paper
-  Future<void> deletePaper(Paper paper) async {
-    await _pdfService.deletePdf(paper.filePath);
-    await _db.deletePaper(paper.id!);
-    _openTabs.removeWhere((p) => p.id == paper.id);
-    if (_viewingPaper?.id == paper.id) {
-      _viewingPaper = _openTabs.isNotEmpty ? _openTabs.first : null;
-    }
-    await refresh();
-  }
-
-  /// Open paper with preferred PDF viewer
-  Future<bool> openPaper(Paper paper) async {
-    if (_pdfReaderType == PdfReaderType.embedded) {
-      // Maintain MRU open tabs list
-      _openTabs.removeWhere((p) => p.id == paper.id);
-      _openTabs.insert(0, paper);
-      _viewingPaper = paper;
-      _isConfigMode = false;
-      notifyListeners();
-      return true;
-    } else if (_pdfReaderType == PdfReaderType.custom &&
-        _customPdfAppPath != null) {
-      return await PdfService.openWithCustomApp(
-        paper.filePath,
-        _customPdfAppPath!,
-      );
-    } else {
-      return await PdfService.openWithSystemViewer(paper.filePath);
-    }
-  }
-
-  /// Close embedded viewer
-  void closePaperViewer() {
-    _viewingPaper = null;
-    notifyListeners();
-  }
-
-  /// Switch to an already-open tab (or add if missing)
-  void switchToTab(Paper paper) {
-    _openTabs.removeWhere((p) => p.id == paper.id);
-    _openTabs.insert(0, paper);
-    _viewingPaper = paper;
-    _isConfigMode = false;
-    notifyListeners();
-  }
-
-  /// Close a specific open tab
-  void closeTab(Paper paper) {
-    final closingCurrent = _viewingPaper?.id == paper.id;
-    _openTabs.removeWhere((p) => p.id == paper.id);
-    if (closingCurrent) {
-      _viewingPaper = _openTabs.isNotEmpty ? _openTabs.first : null;
-    }
-    notifyListeners();
-  }
-
-  /// Reveal paper in Finder
-  Future<bool> revealPaperInFinder(Paper paper) async {
-    return await PdfService.revealInFinder(paper.filePath);
-  }
-
   // ==================== Selection Management ====================
 
   /// Toggle selection of a paper
@@ -1347,36 +833,6 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Check if papers exist in library
-  /// returns a Set of filenames that already exist (based on target path collision)
-  Future<Set<String>> checkIfPapersExist(List<PendingImport> files) async {
-    if (files.isEmpty) return {};
-
-    final appDocDir = await getApplicationSupportDirectory();
-    final predictedPaths =
-        <String, String>{}; // predictedPath -> originalFileName
-
-    for (final file in files) {
-      // Predict where the file would be saved
-      final targetPath = p.join(appDocDir.path, 'papers', file.fileName);
-      predictedPaths[targetPath] = file.fileName;
-    }
-
-    final existingPaths = await _db.checkPapersExist(
-      predictedPaths.keys.toList(),
-    );
-
-    // Map existing paths back to filenames
-    final existingFilenames = <String>{};
-    for (final path in existingPaths) {
-      if (predictedPaths.containsKey(path)) {
-        existingFilenames.add(predictedPaths[path]!);
-      }
-    }
-
-    return existingFilenames;
-  }
-
   /// Select all currently visible papers
   void selectAllPapers() {
     _selectedPaperIds.clear();
@@ -1393,41 +849,31 @@ class AppState extends ChangeNotifier {
   /// Check if a paper is selected
   bool isPaperSelected(int paperId) => _selectedPaperIds.contains(paperId);
 
-  /// Delete selected papers
+  /// Delete selected papers (removes from DB/manifest, not from disk)
   Future<void> deleteSelectedPapers() async {
     if (_selectedPaperIds.isEmpty) return;
 
     _isLoading = true;
     notifyListeners();
 
-    // Create a copy of IDs to delete to avoid modification during iteration
     final idsToDelete = _selectedPaperIds.toList();
 
     try {
       for (final id in idsToDelete) {
-        // Find paper to get path for deletion
-        // We use firstWhereOrNull logic essentially
         try {
           final paper = _papers.firstWhere((p) => p.id == id);
-
-          // Delete file
-          await _pdfService.deletePdf(paper.filePath);
-
-          // Delete from DB (without triggering full refresh yet)
-          await _db.deletePaper(id);
+          await removePaper(paper);
         } catch (e) {
           print('Error deleting paper $id: $e');
-          // Continue deleting others even if one fails
         }
       }
 
-      // Perform a single refresh at the end
       await refresh();
     } catch (e) {
       _error = 'Failed to delete selected papers: $e';
     }
 
-    _selectedPaperIds.clear(); // Ensure selection is cleared
+    _selectedPaperIds.clear();
     _isLoading = false;
     notifyListeners();
   }
