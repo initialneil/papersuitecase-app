@@ -3,20 +3,27 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/app_state.dart';
+import '../services/arxiv_service.dart';
+import 'download_dialog.dart';
 
-/// Search bar with arXiv URL detection
+/// Search bar with arXiv/DOI URL detection
 class SearchBarWidget extends StatefulWidget {
-  final VoidCallback? onImportArxiv;
-
-  const SearchBarWidget({super.key, this.onImportArxiv});
+  const SearchBarWidget({super.key});
 
   @override
   State<SearchBarWidget> createState() => _SearchBarWidgetState();
 }
 
+enum _DetectedUrlType { none, arxiv, doi }
+
 class _SearchBarWidgetState extends State<SearchBarWidget> {
   final TextEditingController _controller = TextEditingController();
   Timer? _debounceTimer;
+  _DetectedUrlType _detectedType = _DetectedUrlType.none;
+
+  static final _arxivPattern =
+      RegExp(r'arxiv\.org/(abs|pdf)/(\d+\.\d+(v\d+)?)');
+  static final _doiPattern = RegExp(r'doi\.org/10\.\S+');
 
   @override
   void dispose() {
@@ -25,24 +32,49 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
     super.dispose();
   }
 
+  _DetectedUrlType _detectUrlType(String value) {
+    if (_arxivPattern.hasMatch(value) || ArxivService.isArxivUrl(value)) {
+      return _DetectedUrlType.arxiv;
+    }
+    if (_doiPattern.hasMatch(value)) {
+      return _DetectedUrlType.doi;
+    }
+    return _DetectedUrlType.none;
+  }
+
   void _onSearchChanged(String value, AppState appState) {
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-      appState.search(value);
-    });
+    final detected = _detectUrlType(value);
+    if (detected != _detectedType) {
+      setState(() => _detectedType = detected);
+    }
+
+    // Only perform search if it's not a URL
+    if (detected == _DetectedUrlType.none) {
+      _debounceTimer?.cancel();
+      _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+        appState.setSearchQuery(value);
+      });
+    }
+  }
+
+  void _handleFetch() {
+    final text = _controller.text.trim();
+    if (_detectedType == _DetectedUrlType.arxiv) {
+      DownloadDialog.show(context, arxivUrl: text);
+    } else if (_detectedType == _DetectedUrlType.doi) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('DOI support coming soon'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, appState, child) {
-        // Sync controller with state if needed
-        if (_controller.text != appState.searchQuery &&
-            appState.searchQuery.isEmpty &&
-            _controller.text.isNotEmpty) {
-          // State was cleared externally
-        }
-
         return Container(
           height: 48,
           decoration: BoxDecoration(
@@ -69,7 +101,7 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
               const SizedBox(width: 8),
               Icon(
                 Icons.search,
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                 size: 22,
               ),
               const SizedBox(width: 12),
@@ -81,7 +113,7 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
                     hintStyle: TextStyle(
                       color: Theme.of(
                         context,
-                      ).colorScheme.onSurface.withOpacity(0.5),
+                      ).colorScheme.onSurface.withValues(alpha: 0.5),
                     ),
                     border: InputBorder.none,
                     contentPadding: EdgeInsets.zero,
@@ -100,26 +132,44 @@ class _SearchBarWidgetState extends State<SearchBarWidget> {
                     size: 20,
                     color: Theme.of(
                       context,
-                    ).colorScheme.onSurface.withOpacity(0.5),
+                    ).colorScheme.onSurface.withValues(alpha: 0.5),
                   ),
                   onPressed: () {
                     _controller.clear();
+                    setState(() => _detectedType = _DetectedUrlType.none);
                     appState.clearSearch();
                   },
                 ),
 
-              // Import from arXiv button (shown when arXiv URL detected)
-              if (appState.detectedArxivUrl != null) ...[
+              // Fetch button (shown when URL detected)
+              if (_detectedType == _DetectedUrlType.arxiv) ...[
                 Container(
                   height: 32,
                   margin: const EdgeInsets.only(right: 8),
                   child: FilledButton.icon(
-                    onPressed: widget.onImportArxiv,
+                    onPressed: _handleFetch,
                     icon: const Icon(Icons.download, size: 18),
-                    label: const Text('Import'),
+                    label: const Text('Fetch'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       textStyle: const TextStyle(fontSize: 14),
+                    ),
+                  ),
+                ),
+              ] else if (_detectedType == _DetectedUrlType.doi) ...[
+                Container(
+                  height: 32,
+                  margin: const EdgeInsets.only(right: 8),
+                  child: Tooltip(
+                    message: 'DOI support coming soon',
+                    child: FilledButton.icon(
+                      onPressed: _handleFetch,
+                      icon: const Icon(Icons.download, size: 18),
+                      label: const Text('Fetch'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        textStyle: const TextStyle(fontSize: 14),
+                      ),
                     ),
                   ),
                 ),

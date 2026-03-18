@@ -48,14 +48,6 @@ class _MainScreenState extends State<MainScreen> {
           autofocus: true,
           child: Scaffold(
             body: DropZone(
-              onPdfFilesDropped: (paths) {
-                final appState = context.read<AppState>();
-                _handlePdfDrop(context, paths, appState);
-              },
-              onFolderDropped: (path) {
-                final appState = context.read<AppState>();
-                _handleFolderDrop(context, path, appState);
-              },
               child: Row(
                 children: [
                   // Left sidebar
@@ -73,10 +65,7 @@ class _MainScreenState extends State<MainScreen> {
                         } else if (appState.isConfigMode) {
                           return const SettingsView();
                         } else {
-                          return _MainContent(
-                            onImportArxiv: () =>
-                                _handleArxivImport(context, appState),
-                          );
+                          return const _MainContent();
                         }
                       },
                     ),
@@ -90,38 +79,11 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // TODO: Remove in Task 9 — rewrite drop/import handlers
-  Future<void> _handlePdfDrop(
-    BuildContext context,
-    List<String> paths,
-    AppState appState,
-  ) async {
-    // ImportDialog removed — will be rewritten in Task 9
-  }
-
-  // TODO: Remove in Task 9 — rewrite folder drop handler
-  Future<void> _handleFolderDrop(
-    BuildContext context,
-    String path,
-    AppState appState,
-  ) async {
-    // FolderDropDialog removed — will be rewritten in Task 9
-  }
-
-  // TODO: Remove in Task 9 — rewrite arXiv import handler
-  Future<void> _handleArxivImport(
-    BuildContext context,
-    AppState appState,
-  ) async {
-    // ImportDialog removed — will be rewritten in Task 9
-  }
 }
 
 /// Main content area with search, tags, and papers
 class _MainContent extends StatelessWidget {
-  final VoidCallback onImportArxiv;
-
-  const _MainContent({required this.onImportArxiv});
+  const _MainContent();
 
   @override
   Widget build(BuildContext context) {
@@ -133,7 +95,7 @@ class _MainContent extends StatelessWidget {
             // Search bar
             Padding(
               padding: const EdgeInsets.all(16),
-              child: SearchBarWidget(onImportArxiv: onImportArxiv),
+              child: const SearchBarWidget(),
             ),
 
             // Current context indicator
