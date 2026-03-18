@@ -135,9 +135,32 @@ class PaperSuitecaseApp extends StatelessWidget {
   }
 }
 
-/// App shell with window title bar
-class _AppShell extends StatelessWidget {
+/// App shell with window title bar and focus listener
+class _AppShell extends StatefulWidget {
   const _AppShell();
+
+  @override
+  State<_AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<_AppShell> with WindowListener {
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowFocus() {
+    // Scan all entries when the window gains focus
+    context.read<AppState>().scanAllEntries();
+  }
 
   @override
   Widget build(BuildContext context) {

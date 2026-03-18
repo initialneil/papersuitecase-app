@@ -105,7 +105,7 @@ class _MainContent extends StatelessWidget {
                 child: Row(
                   children: [
                     Icon(
-                      appState.isOthersSelected
+                      appState.selectedTag?.isUntagged == true
                           ? Icons.folder_off_outlined
                           : Icons.label_outline,
                       size: 18,

@@ -5,8 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/paper.dart';
-
-import '../services/pdf_service.dart';
+import '../services/manifest_service.dart';
 import '../providers/app_state.dart';
 import 'edit_tags_dialog.dart';
 
@@ -53,13 +52,24 @@ class _PaperCardState extends State<PaperCard> {
     // Don't block UI
     Future.microtask(() async {
       if (!mounted) return;
-      final path = await PdfService.generateThumbnail(
+
+      // Resolve thumbnail via ManifestService using entry path
+      final appState = context.read<AppState>();
+      final entry = appState.entries
+          .cast<dynamic>()
+          .firstWhere(
+            (e) => e.id == widget.paper.entryId,
+            orElse: () => null,
+          );
+      if (entry == null) return;
+
+      final thumbPath = ManifestService.thumbnailPath(
+        entry.path,
         widget.paper.filePath,
-        widget.paper.id!,
       );
 
-      if (mounted && path != null) {
-        setState(() => _thumbnailPath = path);
+      if (mounted && await File(thumbPath).exists()) {
+        setState(() => _thumbnailPath = thumbPath);
       }
     });
   }
@@ -303,21 +313,24 @@ class _PaperCardState extends State<PaperCard> {
                                     size: 48,
                                   ),
                                 ),
-                          // Symbolic link badge
-                          if (widget.paper.isSymbolicLink)
+                          // BibTeX status indicator
+                          if (widget.paper.bibStatus == 'verified' ||
+                              widget.paper.bibStatus == 'auto_fetched')
                             Positioned(
                               bottom: 8,
-                              left: 8,
+                              right: 8,
                               child: Container(
-                                padding: const EdgeInsets.all(4),
+                                width: 10,
+                                height: 10,
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.6),
+                                  color: widget.paper.bibStatus == 'verified'
+                                      ? Colors.green
+                                      : Colors.orange,
                                   shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.shortcut,
-                                  color: Colors.white,
-                                  size: 16,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
                                 ),
                               ),
                             ),
@@ -406,13 +419,15 @@ class _PaperCardState extends State<PaperCard> {
           child: Row(
             children: [
               Icon(
-                Icons.delete_outline,
+                Icons.remove_circle_outline,
                 size: 18,
                 color: Theme.of(context).colorScheme.error,
               ),
               const SizedBox(width: 8),
               Text(
-                isMultiSelection ? 'Delete $selectedCount Papers' : 'Delete',
+                isMultiSelection
+                    ? 'Remove $selectedCount from library'
+                    : 'Remove from library',
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ],
@@ -453,9 +468,9 @@ class _PaperCardState extends State<PaperCard> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Paper'),
+        title: const Text('Remove Paper'),
         content: Text(
-          'Are you sure you want to delete "${widget.paper.title}"? This will also delete the PDF file.',
+          'Remove "${widget.paper.title}" from the library? The PDF file on disk will not be deleted.',
         ),
         actions: [
           TextButton(
@@ -464,13 +479,13 @@ class _PaperCardState extends State<PaperCard> {
           ),
           FilledButton(
             onPressed: () {
-              appState.deletePaper(widget.paper);
+              appState.removePaper(widget.paper);
               Navigator.pop(context);
             },
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            child: const Text('Delete'),
+            child: const Text('Remove'),
           ),
         ],
       ),
@@ -485,9 +500,9 @@ class _PaperCardState extends State<PaperCard> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete $count Papers'),
+        title: Text('Remove $count Papers'),
         content: const Text(
-          'Are you sure you want to delete the selected papers? This will also delete the PDF files.',
+          'Remove the selected papers from the library? The PDF files on disk will not be deleted.',
         ),
         actions: [
           TextButton(
@@ -502,7 +517,7 @@ class _PaperCardState extends State<PaperCard> {
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            child: const Text('Delete'),
+            child: const Text('Remove'),
           ),
         ],
       ),

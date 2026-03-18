@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import '../models/paper.dart';
+import '../providers/app_state.dart';
 
 class EmbeddedPdfViewer extends StatefulWidget {
   final Paper paper;
@@ -106,9 +108,8 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
       body: Stack(
         children: [
           GestureDetector(
-            // TODO: Remove in Task 9 — reference right-click removed (ReferenceService deleted)
             child: SfPdfViewer.file(
-              File(widget.paper.filePath),
+              File(context.read<AppState>().resolveFullPath(widget.paper)),
               key: _pdfViewerKey,
               controller: _controller,
               enableHyperlinkNavigation: false, // Prevent automatic jumping

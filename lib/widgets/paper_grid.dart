@@ -36,12 +36,8 @@ class _PaperGridState extends State<PaperGrid> {
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     final papers = appState.papers;
-    // Only show folders when we're inside a folder, not in "All Papers" view
-    final folders = appState.selectedFolder != null
-        ? appState.visibleSubFolders
-        : [];
 
-    if (papers.isEmpty && folders.isEmpty) {
+    if (papers.isEmpty) {
       if (appState.isLoading) {
         return const Center(child: CircularProgressIndicator());
       }
@@ -144,38 +140,10 @@ class _PaperGridState extends State<PaperGrid> {
                       child: BibtexPanel(papers: papers),
                     ),
 
-                  // Folders
-                  if (folders.isNotEmpty)
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                      sliver: SliverGrid(
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          childAspectRatio: 2.2, // Short height for folders
-                          crossAxisSpacing: 20,
-                          mainAxisSpacing: 20,
-                        ),
-                        delegate: SliverChildBuilderDelegate((context, index) {
-                          final folder = folders[index];
-                          return FolderCard(
-                            folder: folder,
-                            onTap: () => appState.selectFolder(folder),
-                            onDoubleTap: () => appState.selectFolder(folder),
-                          );
-                        }, childCount: folders.length),
-                      ),
-                    ),
-
-                  // Spacer
-                  if (folders.isNotEmpty && papers.isNotEmpty)
-                    const SliverToBoxAdapter(child: SizedBox(height: 20)),
-
                   // Papers
                   if (papers.isNotEmpty)
                     SliverPadding(
-                      padding: folders.isNotEmpty
-                          ? const EdgeInsets.fromLTRB(20, 0, 20, 20)
-                          : const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(20),
                       sliver: SliverGrid(
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: crossAxisCount,
