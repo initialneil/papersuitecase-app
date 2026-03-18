@@ -144,6 +144,8 @@ class _AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<_AppShell> with WindowListener {
+  DateTime? _lastScanTime;
+
   @override
   void initState() {
     super.initState();
@@ -158,8 +160,11 @@ class _AppShellState extends State<_AppShell> with WindowListener {
 
   @override
   void onWindowFocus() {
-    // Scan all entries when the window gains focus
-    context.read<AppState>().scanAllEntries();
+    final now = DateTime.now();
+    if (_lastScanTime == null || now.difference(_lastScanTime!).inSeconds >= 10) {
+      _lastScanTime = now;
+      context.read<AppState>().scanAllEntries();
+    }
   }
 
   @override

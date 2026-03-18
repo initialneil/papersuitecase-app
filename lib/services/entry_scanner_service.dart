@@ -10,12 +10,14 @@ import '../services/pdf_service.dart';
 
 /// Result of scanning a single entry directory.
 class ScanResult {
+  final int? entryId;
   final List<Paper> newPapers;
   final List<Paper> removedPapers;
   final List<Paper> renamedPapers;
   final bool entryAccessible;
 
   ScanResult({
+    this.entryId,
     required this.newPapers,
     required this.removedPapers,
     required this.renamedPapers,
@@ -56,6 +58,7 @@ class EntryScannerService {
       final entryDir = Directory(entry.path);
       if (!await entryDir.exists()) {
         return ScanResult(
+          entryId: entry.id,
           newPapers: [],
           removedPapers: [],
           renamedPapers: [],
@@ -146,6 +149,7 @@ class EntryScannerService {
       }
 
       return ScanResult(
+        entryId: entry.id,
         newPapers: newPapers,
         removedPapers: removedPapers,
         renamedPapers: renamedPapers,
@@ -154,6 +158,7 @@ class EntryScannerService {
     } catch (e) {
       print('Error scanning entry ${entry.path}: $e');
       return ScanResult(
+        entryId: entry.id,
         newPapers: [],
         removedPapers: [],
         renamedPapers: [],

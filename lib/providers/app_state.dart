@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -110,6 +111,16 @@ class AppState extends ChangeNotifier {
       await DatabaseService.initialize();
       _scannerService = EntryScannerService(_db, _pdfService);
       await _loadSettings();
+
+      // Auto-add test entry on first launch if entries are empty
+      _entries = await _db.getAllEntries();
+      if (_entries.isEmpty) {
+        final testPath = '/Users/neil/Library/CloudStorage/Nutstore-initialneil@gmail.com/Nutstore/Reading/Papers';
+        if (await Directory(testPath).exists()) {
+          await addEntry(testPath);
+        }
+      }
+
       // Push initial state
       _pushHistory();
       await refresh();
@@ -155,10 +166,7 @@ class AppState extends ChangeNotifier {
 
     _selectedTag = state.tag;
     _selectedEntry = state.entryId != null
-        ? _entries.cast<Entry?>().firstWhere(
-              (e) => e?.id == state.entryId,
-              orElse: () => null,
-            )
+        ? _entries.where((e) => e.id == state.entryId).firstOrNull
         : null;
     _selectedSubfolder = state.subfolder;
     _searchQuery = state.query;
@@ -177,10 +185,7 @@ class AppState extends ChangeNotifier {
 
     _selectedTag = state.tag;
     _selectedEntry = state.entryId != null
-        ? _entries.cast<Entry?>().firstWhere(
-              (e) => e?.id == state.entryId,
-              orElse: () => null,
-            )
+        ? _entries.where((e) => e.id == state.entryId).firstOrNull
         : null;
     _selectedSubfolder = state.subfolder;
     _searchQuery = state.query;
@@ -344,18 +349,21 @@ class AppState extends ChangeNotifier {
     try {
       final results = await _scannerService.scanAllEntries();
 
-      // Process new papers in background for each entry
+      // Process new papers in background for each entry, matched by ID
       final entries = await _db.getAllEntries();
-      for (int i = 0; i < results.length && i < entries.length; i++) {
-        final result = results[i];
+      final entriesById = {for (final e in entries) e.id: e};
+      for (final result in results) {
+        final entry = result.entryId != null ? entriesById[result.entryId] : null;
+        if (entry == null) continue;
+
         if (result.newPapers.isNotEmpty) {
           for (final paper in result.newPapers) {
-            await _scannerService.processNewPaper(paper, entries[i]);
+            await _scannerService.processNewPaper(paper, entry);
           }
         }
 
         // Update accessibility
-        entries[i].isAccessible = result.entryAccessible;
+        entry.isAccessible = result.entryAccessible;
       }
 
       await refresh();
@@ -556,10 +564,7 @@ class AppState extends ChangeNotifier {
   Future<void> removePaper(Paper paper) async {
     try {
       // Find the entry for this paper
-      final entry = _entries.cast<Entry?>().firstWhere(
-            (e) => e?.id == paper.entryId,
-            orElse: () => null,
-          );
+      final entry = _entries.where((e) => e.id == paper.entryId).firstOrNull;
 
       // Remove from DB
       await _db.deletePaper(paper.id!);
@@ -592,10 +597,7 @@ class AppState extends ChangeNotifier {
       final paper = _papers.firstWhere((p) => p.id == paperId);
 
       // Resolve full path via entry
-      final entry = _entries.cast<Entry?>().firstWhere(
-            (e) => e?.id == paper.entryId,
-            orElse: () => null,
-          );
+      final entry = _entries.where((e) => e.id == paper.entryId).firstOrNull;
       if (entry == null) return;
 
       final fullPath = p.join(entry.path, paper.filePath);
@@ -622,10 +624,7 @@ class AppState extends ChangeNotifier {
   /// Open paper with preferred PDF viewer
   Future<bool> openPaper(Paper paper) async {
     // Resolve full path via entry
-    final entry = _entries.cast<Entry?>().firstWhere(
-          (e) => e?.id == paper.entryId,
-          orElse: () => null,
-        );
+    final entry = _entries.where((e) => e.id == paper.entryId).firstOrNull;
     final fullPath =
         entry != null ? p.join(entry.path, paper.filePath) : paper.filePath;
 
@@ -675,10 +674,7 @@ class AppState extends ChangeNotifier {
 
   /// Reveal paper in Finder
   Future<bool> revealPaperInFinder(Paper paper) async {
-    final entry = _entries.cast<Entry?>().firstWhere(
-          (e) => e?.id == paper.entryId,
-          orElse: () => null,
-        );
+    final entry = _entries.where((e) => e.id == paper.entryId).firstOrNull;
     final fullPath =
         entry != null ? p.join(entry.path, paper.filePath) : paper.filePath;
     return await PdfService.revealInFinder(fullPath);
@@ -686,10 +682,7 @@ class AppState extends ChangeNotifier {
 
   /// Resolve full file path for a paper
   String resolveFullPath(Paper paper) {
-    final entry = _entries.cast<Entry?>().firstWhere(
-          (e) => e?.id == paper.entryId,
-          orElse: () => null,
-        );
+    final entry = _entries.where((e) => e.id == paper.entryId).firstOrNull;
     return entry != null ? p.join(entry.path, paper.filePath) : paper.filePath;
   }
 

@@ -205,8 +205,8 @@ class _PdfEntryPickerDialogState extends State<_PdfEntryPickerDialog> {
         await File(sourcePath).copy(destPath);
       }
 
-      // Trigger rescan to pick up new files
-      await widget.appState.scanAllEntries();
+      // Refresh only the target entry to pick up new files
+      await widget.appState.refreshEntry(_selectedEntry!);
 
       if (mounted) {
         Navigator.of(context).pop();

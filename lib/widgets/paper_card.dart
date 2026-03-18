@@ -56,11 +56,8 @@ class _PaperCardState extends State<PaperCard> {
       // Resolve thumbnail via ManifestService using entry path
       final appState = context.read<AppState>();
       final entry = appState.entries
-          .cast<dynamic>()
-          .firstWhere(
-            (e) => e.id == widget.paper.entryId,
-            orElse: () => null,
-          );
+          .where((e) => e.id == widget.paper.entryId)
+          .firstOrNull;
       if (entry == null) return;
 
       final thumbPath = ManifestService.thumbnailPath(

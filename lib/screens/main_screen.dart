@@ -99,26 +99,45 @@ class _MainContent extends StatelessWidget {
             ),
 
             // Current context indicator
-            if (appState.selectedTag != null)
+            if (appState.selectedTag != null || appState.selectedEntry != null)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    Icon(
-                      appState.selectedTag?.isUntagged == true
-                          ? Icons.folder_off_outlined
-                          : Icons.label_outline,
-                      size: 18,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      appState.selectedTag!.name,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    if (appState.selectedEntry != null) ...[
+                      Icon(
+                        Icons.folder_outlined,
+                        size: 18,
                         color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w600,
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${appState.selectedEntry!.name}${appState.selectedSubfolder != null ? " / ${appState.selectedSubfolder}" : ""}',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (appState.selectedEntry != null && appState.selectedTag != null)
+                      const SizedBox(width: 12),
+                    if (appState.selectedTag != null) ...[
+                      Icon(
+                        appState.selectedTag?.isUntagged == true
+                            ? Icons.folder_off_outlined
+                            : Icons.label_outline,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        appState.selectedTag!.name,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                     const Spacer(),
                     TextButton.icon(
                       onPressed: () => appState.clearSelection(),
