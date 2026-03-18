@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:html_unescape/html_unescape_small.dart';
 
+import '../models/paper.dart';
+
 class DblpResult {
   final String title;
   final String authors;
@@ -247,7 +249,7 @@ class BibtexService {
   }
 
   /// Fetch BibTeX from ACM using a DOI page URL or DOI.
-  /// Tries to build the export URL: /action/exportCit?doi=<doi>&format=bibtex
+  /// Tries to build the export URL: /action/exportCit?doi=...&format=bibtex
   static Future<String> _fetchBibtexFromAcm(String doiOrUrl) async {
     try {
       // Extract DOI if a full URL was provided
@@ -280,5 +282,62 @@ class BibtexService {
       print('ACM BibTeX Fetch Error: $e');
       rethrow;
     }
+  }
+
+  /// Auto-fetch BibTeX for a paper by arXiv ID or title.
+  /// Returns the BibTeX string or null if not found.
+  static Future<String?> autoFetch(Paper paper) async {
+    // 1. Try arXiv ID via DBLP
+    if (paper.arxivId != null && paper.arxivId!.isNotEmpty) {
+      try {
+        final results = await searchDblp(paper.arxivId!);
+        if (results.isNotEmpty) return await fetchBibtex(results.first.url);
+      } catch (_) {}
+    }
+    // 2. Try title via DBLP
+    if (paper.title.isNotEmpty) {
+      try {
+        final results = await searchDblp(paper.title);
+        if (results.isNotEmpty) return await fetchBibtex(results.first.url);
+      } catch (_) {}
+      // 3. Try title via ACM
+      try {
+        final results = await _searchAcm(paper.title);
+        if (results.isNotEmpty) {
+          return await _fetchBibtexFromAcm(results.first.url);
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  /// Batch auto-fetch for multiple papers. Returns map of paperId -> bibtex.
+  static Future<Map<int, String>> batchAutoFetch(
+    List<Paper> papers, {
+    void Function(int completed, int total)? onProgress,
+  }) async {
+    final results = <int, String>{};
+    final toFetch =
+        papers.where((p) => p.bibtex == null || p.bibtex!.isEmpty).toList();
+    for (int i = 0; i < toFetch.length; i++) {
+      final paper = toFetch[i];
+      final bib = await autoFetch(paper);
+      if (bib != null && paper.id != null) results[paper.id!] = bib;
+      onProgress?.call(i + 1, toFetch.length);
+      await Future.delayed(const Duration(milliseconds: 500)); // rate limit
+    }
+    return results;
+  }
+
+  /// Export combined BibTeX for a list of papers.
+  static String exportBibtex(List<Paper> papers) {
+    final buffer = StringBuffer();
+    for (final paper in papers) {
+      if (paper.bibtex != null && paper.bibtex!.isNotEmpty) {
+        buffer.writeln(paper.bibtex);
+        buffer.writeln();
+      }
+    }
+    return buffer.toString();
   }
 }

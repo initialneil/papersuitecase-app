@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/app_state.dart';
+import 'bibtex_panel.dart';
 import 'paper_card.dart';
 
 /// Grid of paper cards
@@ -15,6 +16,7 @@ class PaperGrid extends StatefulWidget {
 
 class _PaperGridState extends State<PaperGrid> {
   final FocusNode _focusNode = FocusNode();
+  bool _showBibtexPanel = false;
 
   @override
   void dispose() {
@@ -71,8 +73,77 @@ class _PaperGridState extends State<PaperGrid> {
                 6,
               );
 
+              final showBibtexToggle = appState.selectedTag != null &&
+                  !appState.selectedTag!.isUntagged;
+
               return CustomScrollView(
                 slivers: [
+                  // BibTeX panel toggle + panel
+                  if (showBibtexToggle)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                        child: Row(
+                          children: [
+                            const Spacer(),
+                            Tooltip(
+                              message: _showBibtexPanel
+                                  ? 'Hide BibTeX panel'
+                                  : 'Show BibTeX panel',
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: () => setState(
+                                    () => _showBibtexPanel = !_showBibtexPanel),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.menu_book_rounded,
+                                        size: 16,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'BibTeX',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelMedium
+                                            ?.copyWith(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                      ),
+                                      const SizedBox(width: 2),
+                                      Icon(
+                                        _showBibtexPanel
+                                            ? Icons.expand_less
+                                            : Icons.expand_more,
+                                        size: 16,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  if (showBibtexToggle && _showBibtexPanel)
+                    SliverToBoxAdapter(
+                      child: BibtexPanel(papers: papers),
+                    ),
+
                   // Folders
                   if (folders.isNotEmpty)
                     SliverPadding(

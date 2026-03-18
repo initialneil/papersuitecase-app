@@ -878,6 +878,24 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ==================== BibTeX Management ====================
+
+  /// Update bibtex and bib_status for a paper
+  Future<void> updatePaperBibtex(
+      int paperId, String bibtex, String bibStatus) async {
+    try {
+      final paper = _papers.firstWhere((p) => p.id == paperId);
+      final updated = paper.copyWith(bibtex: bibtex, bibStatus: bibStatus);
+      await _db.updatePaper(updated);
+      await _loadPapers();
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to update BibTeX: $e';
+      print(_error);
+      notifyListeners();
+    }
+  }
+
   /// Clear error
   void clearError() {
     _error = null;
