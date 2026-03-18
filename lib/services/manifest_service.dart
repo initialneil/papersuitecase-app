@@ -10,6 +10,9 @@ class ManifestService {
   static const String _textsDir = 'texts';
   static const String _referencesBib = 'references.bib';
 
+  /// Per-entry locks to prevent concurrent manifest reads/writes
+  static final Map<String, Future<void>> _locks = {};
+
   /// Get the .papersuitecase directory path for an entry
   static String cachePath(String entryPath) => p.join(entryPath, _cacheDir);
 
@@ -108,6 +111,20 @@ class ManifestService {
     await File(filePath).writeAsString(content);
   }
 
+  /// Serialize access to manifest per entry path
+  static Future<T> _withLock<T>(String entryPath, Future<T> Function() fn) async {
+    while (_locks.containsKey(entryPath)) {
+      await _locks[entryPath];
+    }
+    final completer = fn();
+    _locks[entryPath] = completer.then((_) {});
+    try {
+      return await completer;
+    } finally {
+      _locks.remove(entryPath);
+    }
+  }
+
   /// Update a single paper's entry in the manifest
   static Future<void> updatePaperInManifest(
     String entryPath,
@@ -122,35 +139,43 @@ class ManifestService {
     List<String> tags = const [],
     required String addedAt,
   }) async {
-    final manifest =
-        await readManifest(entryPath) ?? {'version': 1, 'papers': {}};
-    final papers = Map<String, dynamic>.from(
-        (manifest['papers'] as Map<String, dynamic>?) ?? {});
-    papers[relativePath] = {
-      'title': title,
-      'authors': authors ?? '',
-      'abstract': abstract_ ?? '',
-      'extracted_text_hash': extractedTextHash ?? '',
-      'arxiv_id': arxivId ?? '',
-      'bibtex': bibtex ?? '',
-      'bib_status': bibStatus,
-      'tags': tags,
-      'added_at': addedAt,
-    };
-    manifest['papers'] = papers;
-    await writeManifest(entryPath, manifest);
+    await _withLock(entryPath, () async {
+      final manifest =
+          await readManifest(entryPath) ?? {'version': 1, 'papers': <String, dynamic>{}};
+      final papersRaw = manifest['papers'];
+      final papers = papersRaw is Map
+          ? Map<String, dynamic>.from(papersRaw)
+          : <String, dynamic>{};
+      papers[relativePath] = <String, dynamic>{
+        'title': title,
+        'authors': authors ?? '',
+        'abstract': abstract_ ?? '',
+        'extracted_text_hash': extractedTextHash ?? '',
+        'arxiv_id': arxivId ?? '',
+        'bibtex': bibtex ?? '',
+        'bib_status': bibStatus,
+        'tags': tags,
+        'added_at': addedAt,
+      };
+      manifest['papers'] = papers;
+      await writeManifest(entryPath, manifest);
+    });
   }
 
   /// Remove a paper from the manifest
   static Future<void> removePaperFromManifest(
       String entryPath, String relativePath) async {
-    final manifest = await readManifest(entryPath);
-    if (manifest == null) return;
-    final papers = Map<String, dynamic>.from(
-        (manifest['papers'] as Map<String, dynamic>?) ?? {});
-    papers.remove(relativePath);
-    manifest['papers'] = papers;
-    await writeManifest(entryPath, manifest);
+    await _withLock(entryPath, () async {
+      final manifest = await readManifest(entryPath);
+      if (manifest == null) return;
+      final papersRaw = manifest['papers'];
+      final papers = papersRaw is Map
+          ? Map<String, dynamic>.from(papersRaw)
+          : <String, dynamic>{};
+      papers.remove(relativePath);
+      manifest['papers'] = papers;
+      await writeManifest(entryPath, manifest);
+    });
   }
 
   /// Regenerate references.bib from all papers with bibtex in manifest
