@@ -11,6 +11,7 @@ import '../widgets/settings_view.dart';
 import '../widgets/embedded_pdf_viewer.dart';
 import '../widgets/auth_screen.dart';
 import '../widgets/discover_tab.dart';
+import '../widgets/paper_chat_panel.dart';
 import 'package:flutter/services.dart';
 
 /// Main application screen
@@ -69,9 +70,45 @@ class _MainScreenState extends State<MainScreen> {
                         if (appState.showDiscover) {
                           return const DiscoverTab();
                         } else if (appState.viewingPaper != null) {
-                          return EmbeddedPdfViewer(
-                            paper: appState.viewingPaper!,
-                            onBack: () => appState.closePaperViewer(),
+                          return Row(
+                            children: [
+                              Expanded(
+                                child: Stack(
+                                  children: [
+                                    EmbeddedPdfViewer(
+                                      paper: appState.viewingPaper!,
+                                      onBack: () =>
+                                          appState.closePaperViewer(),
+                                    ),
+                                    if (appState.isLoggedIn)
+                                      Positioned(
+                                        top: 8,
+                                        right: 8,
+                                        child: IconButton(
+                                          icon: Icon(
+                                            appState.showChatPanel
+                                                ? Icons.chat
+                                                : Icons.chat_outlined,
+                                          ),
+                                          onPressed: () =>
+                                              appState.toggleChatPanel(),
+                                          tooltip: 'Chat about this paper',
+                                          style: IconButton.styleFrom(
+                                            backgroundColor: Theme.of(context)
+                                                .colorScheme
+                                                .surface
+                                                .withValues(alpha: 0.9),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              if (appState.isLoggedIn &&
+                                  appState.showChatPanel)
+                                PaperChatPanel(
+                                    paper: appState.viewingPaper!),
+                            ],
                           );
                         } else if (appState.isConfigMode) {
                           return const SettingsView();

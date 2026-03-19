@@ -17,6 +17,8 @@ import '../services/manifest_service.dart';
 import '../services/supabase_service.dart';
 import '../services/sync_service.dart';
 import '../services/recommendation_service.dart';
+import '../services/llm_chat_service.dart';
+import '../models/chat_message.dart';
 
 class _NavigationState {
   final Tag? tag;
@@ -96,6 +98,12 @@ class AppState extends ChangeNotifier {
   bool _isLoadingRecommendations = false;
   bool _showDiscover = false;
 
+  // Chat state
+  final LlmChatService _llmChatService = LlmChatService();
+  final Map<int, List<ChatMessage>> _chatHistories = {};
+  bool _isChatLoading = false;
+  bool _showChatPanel = false;
+
   // Getters
   List<Paper> get papers => _papers;
   List<Tag> get tagTree => _tagTree;
@@ -129,6 +137,12 @@ class AppState extends ChangeNotifier {
   Recommendations get recommendations => _recommendations;
   bool get isLoadingRecommendations => _isLoadingRecommendations;
   bool get showDiscover => _showDiscover;
+
+  // Chat Getters
+  bool get isChatLoading => _isChatLoading;
+  bool get showChatPanel => _showChatPanel;
+  List<ChatMessage> getChatHistory(int paperId) =>
+      _chatHistories[paperId] ?? [];
 
   // Auth Getters
   User? get currentUser => _currentUser;
@@ -1143,6 +1157,58 @@ class AppState extends ChangeNotifier {
 
   void hideDiscoverTab() {
     _showDiscover = false;
+    notifyListeners();
+  }
+
+  // ==================== Chat ====================
+
+  void toggleChatPanel() {
+    _showChatPanel = !_showChatPanel;
+    notifyListeners();
+  }
+
+  Future<void> sendChatMessage(Paper paper, String question) async {
+    if (!isLoggedIn || paper.id == null) return;
+
+    final history = _chatHistories.putIfAbsent(paper.id!, () => []);
+    history.add(ChatMessage(role: 'user', content: question));
+    _isChatLoading = true;
+    notifyListeners();
+
+    try {
+      final response = await _llmChatService.chat(
+        paperTitle: paper.title,
+        authors: paper.authors,
+        abstract: paper.abstract,
+        bibtex: paper.bibtex,
+        question: question,
+        history: history,
+      );
+
+      history.add(ChatMessage(role: 'assistant', content: response));
+
+      // Refresh profile to update call count
+      SupabaseService.getProfile().then((profile) {
+        _userProfile = profile;
+        notifyListeners();
+      });
+    } on RateLimitException catch (e) {
+      history.add(ChatMessage(
+        role: 'assistant',
+        content:
+            'You\'ve reached your monthly chat limit (${e.used}/${e.limit}). Upgrade to Pro for more.',
+      ));
+    } catch (e) {
+      history.add(ChatMessage(
+          role: 'assistant', content: 'Sorry, something went wrong: $e'));
+    } finally {
+      _isChatLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void clearChatHistory(int paperId) {
+    _chatHistories.remove(paperId);
     notifyListeners();
   }
 
