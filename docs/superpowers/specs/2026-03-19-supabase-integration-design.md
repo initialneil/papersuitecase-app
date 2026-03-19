@@ -14,6 +14,7 @@ Add Supabase backend to Paper Suitcase for user authentication, metadata sync, c
 ## Non-Goals
 
 - Cloud storage of PDFs or full extracted text
+- Syncing folder/entry organization (entries are a local concept tied to file paths)
 - Real-time collaboration or shared libraries (future consideration)
 - Mobile or web client (desktop-only for now)
 
@@ -63,9 +64,10 @@ CREATE TABLE user_papers (
   authors TEXT,
   abstract TEXT,
   bibtex TEXT,
-  content_hash TEXT,
+  sync_key TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(user_id, content_hash)
+  UNIQUE(user_id, sync_key)
 );
 
 CREATE TABLE user_tags (
@@ -88,12 +90,15 @@ CREATE TABLE user_paper_tags (
 ```sql
 CREATE TABLE shared_catalog (
   id BIGSERIAL PRIMARY KEY,
-  arxiv_id TEXT UNIQUE NOT NULL,
+  arxiv_id TEXT UNIQUE,
+  doi TEXT UNIQUE,
+  title_hash TEXT,
   title TEXT NOT NULL,
   authors TEXT,
   abstract TEXT,
   reader_count INTEGER NOT NULL DEFAULT 1,
-  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (arxiv_id IS NOT NULL OR doi IS NOT NULL OR title_hash IS NOT NULL)
 );
 
 CREATE TABLE catalog_tags (
@@ -103,20 +108,122 @@ CREATE TABLE catalog_tags (
   usage_count INTEGER NOT NULL DEFAULT 1,
   UNIQUE(catalog_id, tag_name)
 );
+
+CREATE TABLE trending_scores (
+  id BIGSERIAL PRIMARY KEY,
+  catalog_id BIGINT NOT NULL REFERENCES shared_catalog(id) ON DELETE CASCADE,
+  score FLOAT NOT NULL DEFAULT 0,
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for recommendation queries
+CREATE INDEX idx_user_papers_user ON user_papers(user_id);
+CREATE INDEX idx_user_papers_arxiv ON user_papers(arxiv_id);
+CREATE INDEX idx_user_papers_sync_key ON user_papers(user_id, sync_key);
+CREATE INDEX idx_shared_catalog_arxiv ON shared_catalog(arxiv_id);
+CREATE INDEX idx_shared_catalog_title_hash ON shared_catalog(title_hash);
+CREATE INDEX idx_catalog_tags_catalog ON catalog_tags(catalog_id);
+CREATE INDEX idx_trending_scores_score ON trending_scores(score DESC);
 ```
 
 ### Sync Strategy
 
+**Principles:**
 1. **Local SQLite is source of truth.** App works identically without an account.
-2. **On login:** background sync pushes local metadata to `user_papers` and `user_tags`. Uses `content_hash` to detect changes and sync diffs only.
-3. **Shared catalog contribution:** when a user syncs a paper with an `arxiv_id`, upsert into `shared_catalog` and increment `reader_count`. Papers without `arxiv_id` stay private.
-4. **Conflict resolution:** last-write-wins on metadata fields. Tags merge (union of local + cloud). Deletes propagate.
-5. **No full text or PDFs** ever leave the device.
+2. **No full text or PDFs** ever leave the device.
+3. **Sync is local-to-cloud only** (unidirectional push). No cloud-to-local sync in v1. Future multi-device support would require bidirectional sync.
+
+**Sync identity (`sync_key`):**
+Each paper needs a stable, non-null identity for cloud dedup. The `sync_key` is computed locally as:
+- `arxiv:{arxiv_id}` if arxiv_id is present
+- `hash:{content_hash}` if content_hash is present
+- `title:{sha256(lowercase(title + authors))}` as fallback
+This is stored in a new local SQLite column `papers.sync_key` (added via migration).
+
+**Local schema additions (SQLite migration v6):**
+```sql
+ALTER TABLE papers ADD COLUMN sync_key TEXT;
+ALTER TABLE papers ADD COLUMN remote_id BIGINT;
+ALTER TABLE papers ADD COLUMN updated_at TEXT;
+ALTER TABLE papers ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE tags ADD COLUMN remote_id BIGINT;
+ALTER TABLE tags ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1;
+```
+- `sync_key`: stable dedup key for cloud upsert
+- `remote_id`: corresponding Supabase row ID after sync
+- `updated_at`: timestamp for conflict resolution (set on every local edit)
+- `dirty`: 1 = needs sync, 0 = in sync. Set to 1 on any local change.
+
+**Sync flow (on login / periodic / manual trigger):**
+1. Query local papers where `dirty = 1`.
+2. Batch upsert to `user_papers` (keyed on `user_id + sync_key`), sending title, authors, abstract, bibtex, arxiv_id, updated_at.
+3. On success, store returned `remote_id` locally and set `dirty = 0`.
+4. For papers with arxiv_id: upsert into `shared_catalog` via server-side RPC (increments `reader_count`).
+5. Sync tags: topological sort (parents before children), upsert to `user_tags`, store `remote_id`.
+6. Sync paper-tag associations using the resolved remote IDs.
+
+**Tag hierarchy sync:**
+Tags are synced parent-first via topological sort. If a parent tag doesn't have a `remote_id` yet, it is synced first. Tag identity is `(user_id, name, parent_remote_id)`.
+
+**First-time bulk sync:**
+On first login with an existing library, sync in batches of 50 papers with a progress indicator. Estimated time for 500 papers: ~5-10 seconds.
+
+**Conflict resolution:**
+Last-write-wins using `updated_at` timestamp. Since v1 is local-to-cloud only (single device), conflicts are unlikely. The `updated_at` field prepares for future multi-device support.
+
+**Deletes:**
+Local-to-cloud only. When a user deletes a paper locally, set a `deleted_at` timestamp (soft delete) and sync to cloud on next push. A periodic cleanup job hard-deletes soft-deleted records older than 30 days. Cloud deletions do not propagate back to local in v1.
+
+**Shared catalog scope:**
+The shared catalog supports three dedup keys: `arxiv_id`, `doi`, and `title_hash` (sha256 of normalized title+authors). Papers matching any key are merged. This extends recommendations beyond arXiv-only papers, though collaborative filtering works best when papers have stable identifiers (arxiv_id or doi). Papers with only title_hash matching may have false positives and are weighted lower in recommendations.
 
 ### Row-Level Security (RLS)
 
-- `user_papers`, `user_tags`, `user_paper_tags`: users read/write only their own rows.
-- `shared_catalog`, `catalog_tags`: all authenticated users can read; writes via server-side functions only (controls deduplication).
+All tables have RLS enabled. Policies:
+
+```sql
+-- profiles: users can read/update only their own profile
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY profiles_select ON profiles FOR SELECT USING (auth.uid() = id);
+CREATE POLICY profiles_update ON profiles FOR UPDATE USING (auth.uid() = id);
+
+-- user_papers: users can CRUD only their own papers
+ALTER TABLE user_papers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY user_papers_select ON user_papers FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY user_papers_insert ON user_papers FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY user_papers_update ON user_papers FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY user_papers_delete ON user_papers FOR DELETE USING (auth.uid() = user_id);
+
+-- user_tags: users can CRUD only their own tags
+ALTER TABLE user_tags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY user_tags_select ON user_tags FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY user_tags_insert ON user_tags FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY user_tags_update ON user_tags FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY user_tags_delete ON user_tags FOR DELETE USING (auth.uid() = user_id);
+
+-- user_paper_tags: access via join ownership check
+ALTER TABLE user_paper_tags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY user_paper_tags_select ON user_paper_tags FOR SELECT
+  USING (EXISTS (SELECT 1 FROM user_papers WHERE id = user_paper_id AND user_id = auth.uid()));
+CREATE POLICY user_paper_tags_insert ON user_paper_tags FOR INSERT
+  WITH CHECK (EXISTS (SELECT 1 FROM user_papers WHERE id = user_paper_id AND user_id = auth.uid()));
+CREATE POLICY user_paper_tags_delete ON user_paper_tags FOR DELETE
+  USING (EXISTS (SELECT 1 FROM user_papers WHERE id = user_paper_id AND user_id = auth.uid()));
+
+-- shared_catalog: all authenticated users can read, no direct writes (server-side RPC only)
+ALTER TABLE shared_catalog ENABLE ROW LEVEL SECURITY;
+CREATE POLICY shared_catalog_select ON shared_catalog FOR SELECT USING (auth.role() = 'authenticated');
+
+-- catalog_tags: all authenticated users can read, no direct writes
+ALTER TABLE catalog_tags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY catalog_tags_select ON catalog_tags FOR SELECT USING (auth.role() = 'authenticated');
+
+-- trending_scores: all authenticated users can read
+ALTER TABLE trending_scores ENABLE ROW LEVEL SECURITY;
+CREATE POLICY trending_scores_select ON trending_scores FOR SELECT USING (auth.role() = 'authenticated');
+```
+
+Shared catalog writes happen exclusively through Postgres RPC functions executed with `SECURITY DEFINER` (bypasses RLS, runs as the function owner). This ensures dedup logic is centralized.
 
 ### Storage Estimate
 
@@ -125,6 +232,10 @@ CREATE TABLE catalog_tags (
 ---
 
 ## Section 3: Recommendation Engine
+
+### Scope Limitation
+
+Collaborative filtering (Type 1) and trending (Type 3) work best for papers with stable identifiers (arxiv_id or doi). Papers matched only by title_hash are weighted lower due to potential false positives. For fields with low arXiv/DOI coverage (medicine, humanities), tag-based suggestions (Type 2) will be the primary recommendation source. This is acceptable for v1 — the target audience is CS/ML/physics researchers who use arXiv heavily.
 
 ### Type 1: Collaborative Filtering ("Users like you also read")
 
@@ -148,7 +259,7 @@ CREATE TABLE catalog_tags (
 
 ### Delivery
 
-- Flutter calls Supabase RPC on app launch / pull-to-refresh.
+- Flutter calls Supabase RPC on app launch / manual refresh button.
 - Results cached locally for offline access.
 - "Discover" tab in UI shows recommendations grouped by type.
 
@@ -164,11 +275,14 @@ CREATE TABLE catalog_tags (
 
 ### Flow
 
-1. User opens a paper, taps "Chat about this paper."
+1. User opens a paper, clicks "Chat about this paper."
 2. Flutter sends to Edge Function: `{ paper_title, authors, abstract, bibtex, user_question, conversation_history }`.
-3. Edge Function builds system prompt with paper context.
-4. Proxies to MiniMax M2.5, streams response back to Flutter.
-5. Increments `llm_calls_this_month`.
+3. Edge Function checks rate limit first: if `llm_calls_this_month >= tier_limit`, return 429 immediately.
+4. Edge Function increments `llm_calls_this_month` **before** calling MiniMax (pessimistic counting — prevents abuse via rapid requests; if MiniMax fails, user loses one credit but this is rare and preferable to allowing unlimited retries).
+5. Edge Function builds system prompt with paper context.
+6. Proxies to MiniMax M2.5, streams response back to Flutter.
+
+**Conversation history limit:** maximum 10 previous turns (5 user + 5 assistant messages) sent to MiniMax. Older messages are truncated from the front. This keeps token usage predictable at ~4K tokens max for history.
 
 ### What Gets Sent to MiniMax
 
