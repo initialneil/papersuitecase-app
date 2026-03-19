@@ -30,6 +30,7 @@ class _BibtexPanelState extends State<BibtexPanel> {
   int _fetchProgress = 0;
   int _fetchTotal = 0;
   final Set<int> _fetchingIds = {};
+  int? _expandedPaperId; // Which paper's bibtex is shown expanded
 
   int get _hasBibtexCount =>
       widget.papers.where((p) => p.bibtex != null && p.bibtex!.isNotEmpty).length;
@@ -277,81 +278,178 @@ class _BibtexPanelState extends State<BibtexPanel> {
                 final isFetching =
                     paper.id != null && _fetchingIds.contains(paper.id!);
 
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      _buildStatusIcon(paper),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          paper.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ),
-                      if (citKey != null) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: colorScheme.primaryContainer
-                                .withValues(alpha: 0.5),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            citKey,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              fontFamily: 'monospace',
-                              color: colorScheme.onPrimaryContainer,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        _ActionButton(
-                          icon: Icons.copy,
-                          tooltip: 'Copy citation key',
-                          size: 16,
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(text: citKey));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                  content: Text('Copied: $citKey'),
-                                  duration: const Duration(seconds: 1)),
-                            );
-                          },
-                        ),
-                      ],
-                      const SizedBox(width: 4),
-                      if (isFetching)
-                        const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      else if (!hasBib)
-                        _ActionButton(
-                          icon: Icons.cloud_download_outlined,
-                          tooltip: 'Fetch BibTeX',
-                          size: 16,
-                          onPressed: () => _autoFetchSingle(paper),
-                        )
-                      else if (paper.bibStatus == 'auto_fetched')
-                        _ActionButton(
-                          icon: Icons.verified_outlined,
-                          tooltip: 'Mark as verified',
-                          size: 16,
-                          onPressed: () => _verifyPaper(paper),
-                        ),
-                    ],
-                  ),
+                return _BibtexPaperRow(
+                  paper: paper,
+                  citKey: citKey,
+                  hasBib: hasBib,
+                  isFetching: isFetching,
+                  statusIcon: _buildStatusIcon(paper),
+                  onFetch: () => _autoFetchSingle(paper),
+                  onVerify: () => _verifyPaper(paper),
+                  expandedPaperId: _expandedPaperId,
+                  onToggleExpand: (id) => setState(() {
+                    _expandedPaperId = _expandedPaperId == id ? null : id;
+                  }),
                 );
               },
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A single paper row with expandable bibtex content.
+class _BibtexPaperRow extends StatelessWidget {
+  final Paper paper;
+  final String? citKey;
+  final bool hasBib;
+  final bool isFetching;
+  final Widget statusIcon;
+  final VoidCallback onFetch;
+  final VoidCallback onVerify;
+  final int? expandedPaperId;
+  final ValueChanged<int?> onToggleExpand;
+
+  const _BibtexPaperRow({
+    required this.paper,
+    required this.citKey,
+    required this.hasBib,
+    required this.isFetching,
+    required this.statusIcon,
+    required this.onFetch,
+    required this.onVerify,
+    required this.expandedPaperId,
+    required this.onToggleExpand,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isExpanded = paper.id != null && expandedPaperId == paper.id;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: hasBib ? () => onToggleExpand(paper.id) : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                statusIcon,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    paper.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: isExpanded ? FontWeight.w600 : null,
+                    ),
+                  ),
+                ),
+                if (citKey != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer
+                          .withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      citKey!,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontFamily: 'monospace',
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  _ActionButton(
+                    icon: Icons.copy,
+                    tooltip: 'Copy citation key',
+                    size: 16,
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: citKey!));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text('Copied: $citKey'),
+                            duration: const Duration(seconds: 1)),
+                      );
+                    },
+                  ),
+                ],
+                if (hasBib) ...[
+                  _ActionButton(
+                    icon: Icons.copy_all,
+                    tooltip: 'Copy full BibTeX',
+                    size: 16,
+                    onPressed: () {
+                      Clipboard.setData(
+                          ClipboardData(text: paper.bibtex!));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('BibTeX copied'),
+                            duration: Duration(seconds: 1)),
+                      );
+                    },
+                  ),
+                  Icon(
+                    isExpanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ],
+                const SizedBox(width: 4),
+                if (isFetching)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else if (!hasBib)
+                  _ActionButton(
+                    icon: Icons.cloud_download_outlined,
+                    tooltip: 'Fetch BibTeX',
+                    size: 16,
+                    onPressed: onFetch,
+                  )
+                else if (paper.bibStatus == 'auto_fetched')
+                  _ActionButton(
+                    icon: Icons.verified_outlined,
+                    tooltip: 'Mark as verified',
+                    size: 16,
+                    onPressed: onVerify,
+                  ),
+              ],
+            ),
+          ),
+        ),
+        // Expanded bibtex content
+        if (isExpanded && hasBib)
+          Container(
+            margin: const EdgeInsets.only(left: 26, bottom: 8),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+            ),
+            child: SelectableText(
+              paper.bibtex!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

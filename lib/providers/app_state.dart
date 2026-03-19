@@ -195,32 +195,24 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _loadPapers() async {
+    _relatedTags = [];
+
     if (_searchQuery.isNotEmpty) {
       _papers = await _db.searchPapers(_searchQuery);
       _relatedTags = await _db.getRelatedTags(_searchQuery);
     } else if (_selectedTag != null && _selectedTag!.isUntagged) {
-      _papers = await _db.getUntaggedPapers(
-        entryId: _selectedEntry?.id,
-      );
-      _relatedTags = [];
+      _papers = await _db.getUntaggedPapers();
     } else if (_selectedTag != null) {
-      _papers = await _db.getPapersByTag(
-        _selectedTag!.id!,
-        entryId: _selectedEntry?.id,
-      );
-      _relatedTags = [];
+      _papers = await _db.getPapersByTag(_selectedTag!.id!);
     } else if (_selectedEntry != null && _selectedSubfolder != null) {
       _papers = await _db.getPapersByEntryAndSubfolder(
         _selectedEntry!.id!,
         _selectedSubfolder!,
       );
-      _relatedTags = [];
     } else if (_selectedEntry != null) {
       _papers = await _db.getPapersByEntry(_selectedEntry!.id!);
-      _relatedTags = [];
     } else {
       _papers = await _db.getAllPapers();
-      _relatedTags = [];
     }
 
     _untaggedCount = await _db.getUntaggedPaperCount();
@@ -543,9 +535,11 @@ class AppState extends ChangeNotifier {
 
   // ==================== Selection (Entry/Tag) ====================
 
-  /// Select a tag to filter papers (co-selection: keeps entry)
+  /// Select a tag to filter papers (clears entry selection)
   Future<void> selectTag(Tag? tag) async {
     _selectedTag = tag;
+    _selectedEntry = null;
+    _selectedSubfolder = null;
     _searchQuery = '';
 
     if (tag != null && !tag.isUntagged) {
@@ -559,10 +553,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Select an entry to filter papers (co-selection: keeps tag)
+  /// Select an entry to filter papers (clears tag selection)
   Future<void> selectEntry(Entry? entry, {String? subfolder}) async {
     _selectedEntry = entry;
     _selectedSubfolder = subfolder;
+    _selectedTag = null;
+    _lastActiveTagPath = [];
     _searchQuery = '';
 
     _pushHistory();
