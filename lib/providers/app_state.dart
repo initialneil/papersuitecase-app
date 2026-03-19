@@ -238,11 +238,40 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _loadTagTree() async {
+    // Preserve expansion state
+    final oldExpanded = <int>{};
+    void collectExpanded(List<Tag> tags) {
+      for (final t in tags) {
+        if (t.isExpanded && t.id != null) oldExpanded.add(t.id!);
+        collectExpanded(t.children);
+      }
+    }
+    collectExpanded(_tagTree);
+
     _tagTree = await _db.getTagTree();
+
+    // Restore expansion state
+    void restoreExpanded(List<Tag> tags) {
+      for (final t in tags) {
+        if (t.id != null && oldExpanded.contains(t.id)) t.isExpanded = true;
+        restoreExpanded(t.children);
+      }
+    }
+    restoreExpanded(_tagTree);
   }
 
   Future<void> _loadEntries() async {
+    // Preserve expansion state across reloads
+    final oldExpanded = {for (final e in _entries) if (e.isExpanded) e.id: true};
+
     _entries = await _db.getAllEntries();
+
+    // Restore expansion state
+    for (final entry in _entries) {
+      if (oldExpanded.containsKey(entry.id)) {
+        entry.isExpanded = true;
+      }
+    }
 
     // Update paper counts and subfolder counts
     final counts = await _db.getEntryPaperCounts();
