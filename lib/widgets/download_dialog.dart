@@ -60,6 +60,7 @@ class _DownloadDialogState extends State<DownloadDialog> {
   Set<int> _selectedTagIds = {};
   List<String> _subfolderSuggestions = [];
   bool _isCustomSubfolder = false;
+  List<String> _newTagNames = []; // Tags to create on download
 
   @override
   void initState() {
@@ -216,6 +217,48 @@ class _DownloadDialogState extends State<DownloadDialog> {
     }
   }
 
+  void _showAddTagDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New Tag'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Tag name',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+          onSubmitted: (value) {
+            final name = value.trim();
+            if (name.isNotEmpty) {
+              setState(() => _newTagNames.add(name));
+              Navigator.of(ctx).pop();
+            }
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                setState(() => _newTagNames.add(name));
+                Navigator.of(ctx).pop();
+              }
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _sanitizeFilename(String name) {
     return name
         .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
@@ -268,9 +311,15 @@ class _DownloadDialogState extends State<DownloadDialog> {
       );
       final paperId = await db.insertPaper(paper);
 
-      // Assign selected tags
+      // Assign selected existing tags
       for (final tagId in _selectedTagIds) {
         await db.addTagToPaper(paperId, tagId);
+      }
+
+      // Create and assign new tags
+      for (final tagName in _newTagNames) {
+        final tag = await db.getOrCreateTag(tagName);
+        await db.addTagToPaper(paperId, tag.id!);
       }
 
       // Refresh
@@ -499,43 +548,85 @@ class _DownloadDialogState extends State<DownloadDialog> {
             const SizedBox(height: 16),
 
             // Tag assignment
-            Text('Tags:', style: Theme.of(context).textTheme.labelLarge),
+            Row(
+              children: [
+                Text('Tags:', style: Theme.of(context).textTheme.labelLarge),
+                const Spacer(),
+                // Add new tag button
+                SizedBox(
+                  height: 28,
+                  child: TextButton.icon(
+                    onPressed: _isDownloading ? null : _showAddTagDialog,
+                    icon: const Icon(Icons.add, size: 14),
+                    label: const Text('New tag', style: TextStyle(fontSize: 12)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 6),
+
+            // Selected tags (shown first as removable chips)
+            if (_newTagNames.isNotEmpty || _selectedTagIds.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    // Existing selected tags
+                    ..._suggestedTags
+                        .where((t) => t.id != null && _selectedTagIds.contains(t.id))
+                        .map((tag) => Chip(
+                              label: Text(tag.name, style: const TextStyle(fontSize: 11)),
+                              deleteIcon: const Icon(Icons.close, size: 14),
+                              visualDensity: VisualDensity.compact,
+                              onDeleted: _isDownloading
+                                  ? null
+                                  : () => setState(() => _selectedTagIds.remove(tag.id!)),
+                            )),
+                    // New tags (not yet in DB)
+                    ..._newTagNames.map((name) => Chip(
+                          label: Text(name, style: const TextStyle(fontSize: 11)),
+                          deleteIcon: const Icon(Icons.close, size: 14),
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: colorScheme.tertiaryContainer,
+                          onDeleted: _isDownloading
+                              ? null
+                              : () => setState(() => _newTagNames.remove(name)),
+                        )),
+                  ],
+                ),
+              ),
+
+            // Available tags to add
             if (_suggestedTags.isNotEmpty)
               ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 120),
+                constraints: const BoxConstraints(maxHeight: 100),
                 child: SingleChildScrollView(
                   child: Wrap(
                     spacing: 6,
                     runSpacing: 4,
-                    children: _suggestedTags.take(20).map((tag) {
-                      final isSelected =
-                          tag.id != null && _selectedTagIds.contains(tag.id);
-                      return FilterChip(
+                    children: _suggestedTags
+                        .where((t) => t.id != null && !_selectedTagIds.contains(t.id))
+                        .take(20)
+                        .map((tag) {
+                      return ActionChip(
                         label: Text(tag.name,
                             style: const TextStyle(fontSize: 11)),
-                        selected: isSelected,
+                        avatar: const Icon(Icons.add, size: 12),
                         visualDensity: VisualDensity.compact,
-                        onSelected: _isDownloading
+                        onPressed: _isDownloading
                             ? null
-                            : (selected) {
-                                setState(() {
-                                  if (selected && tag.id != null) {
-                                    _selectedTagIds.add(tag.id!);
-                                  } else if (tag.id != null) {
-                                    _selectedTagIds.remove(tag.id!);
-                                  }
-                                });
-                              },
+                            : () => setState(() => _selectedTagIds.add(tag.id!)),
                       );
                     }).toList(),
                   ),
                 ),
-              )
-            else
-              Text('No tags yet',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurface.withValues(alpha: 0.5))),
+              ),
           ],
         ],
       ),
