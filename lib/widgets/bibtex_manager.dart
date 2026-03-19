@@ -281,14 +281,17 @@ class _BibtexManagerState extends State<BibtexManager> {
                     Icon(Icons.menu_book_rounded,
                         size: 20, color: colorScheme.primary),
                     const SizedBox(width: 8),
-                    Text(
-                      'BibTeX Manager — ${widget.title}',
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w600),
+                    Flexible(
+                      child: Text(
+                        'BibTeX — ${widget.title}',
+                        style: theme.textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     Text(
-                      '${_papers.length} papers · $_hasBibCount have BibTeX · $_missingCount missing',
+                      '$_hasBibCount/${_papers.length}',
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: colorScheme.onSurfaceVariant),
                     ),
@@ -296,49 +299,51 @@ class _BibtexManagerState extends State<BibtexManager> {
                     // Batch actions
                     if (_isBatchSearching) ...[
                       SizedBox(
-                        width: 100,
+                        width: 80,
                         child: LinearProgressIndicator(
                           value: _batchTotal > 0
                               ? _batchProgress / _batchTotal
                               : null,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       Text('$_batchProgress/$_batchTotal',
                           style: theme.textTheme.bodySmall),
-                      const SizedBox(width: 8),
-                      TextButton(
+                      IconButton(
                         onPressed: () =>
                             setState(() => _isBatchSearching = false),
-                        child: const Text('Stop'),
+                        icon: const Icon(Icons.stop, size: 18),
+                        tooltip: 'Stop',
+                        visualDensity: VisualDensity.compact,
                       ),
                     ] else ...[
-                      TextButton.icon(
+                      IconButton(
                         onPressed: _missingCount > 0 ? _batchSearch : null,
-                        icon: const Icon(Icons.cloud_download_outlined,
-                            size: 16),
-                        label: const Text('Auto-fetch missing'),
+                        icon: const Icon(Icons.cloud_download_outlined, size: 18),
+                        tooltip: 'Auto-fetch missing ($_missingCount)',
+                        visualDensity: VisualDensity.compact,
                       ),
-                      const SizedBox(width: 4),
-                      TextButton.icon(
+                      IconButton(
                         onPressed: _hasBibCount > 0 ? _copyAll : null,
-                        icon: const Icon(Icons.copy_all, size: 16),
-                        label: const Text('Copy all'),
+                        icon: const Icon(Icons.copy_all, size: 18),
+                        tooltip: 'Copy all BibTeX',
+                        visualDensity: VisualDensity.compact,
                       ),
-                      const SizedBox(width: 4),
-                      TextButton.icon(
+                      IconButton(
                         onPressed: _hasBibCount > 0 ? _exportAll : null,
-                        icon: const Icon(Icons.save_alt, size: 16),
-                        label: const Text('Export .bib'),
+                        icon: const Icon(Icons.save_alt, size: 18),
+                        tooltip: 'Export .bib file',
+                        visualDensity: VisualDensity.compact,
                       ),
                     ],
-                    const SizedBox(width: 8),
                     IconButton(
                       onPressed: () async {
                         if (_editorDirty) await _saveCurrentEditor();
                         if (mounted) Navigator.of(context).pop();
                       },
-                      icon: const Icon(Icons.close),
+                      icon: const Icon(Icons.close, size: 18),
+                      tooltip: 'Close',
+                      visualDensity: VisualDensity.compact,
                     ),
                   ],
                 ),

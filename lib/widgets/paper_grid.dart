@@ -69,36 +69,8 @@ class _PaperGridState extends State<PaperGrid> {
                 6,
               );
 
-              final showBibtexButton = appState.selectedTag != null &&
-                  !appState.selectedTag!.isUntagged;
-
               return CustomScrollView(
                 slivers: [
-                  // BibTeX Manager button
-                  if (showBibtexButton)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                        child: Row(
-                          children: [
-                            const Spacer(),
-                            TextButton.icon(
-                              onPressed: () => BibtexManager.show(
-                                context,
-                                papers: papers,
-                                title: appState.selectedTag!.name,
-                              ),
-                              icon: const Icon(Icons.menu_book_rounded, size: 16),
-                              label: const Text('BibTeX Manager'),
-                              style: TextButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
                   // Papers
                   if (papers.isNotEmpty)
                     SliverPadding(

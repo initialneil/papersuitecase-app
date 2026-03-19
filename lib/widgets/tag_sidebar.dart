@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/app_state.dart';
+import 'bibtex_manager.dart';
 import 'entry_sidebar_section.dart';
 import 'tag_sidebar_section.dart';
 
@@ -141,7 +142,20 @@ class _SettingsButton extends StatelessWidget {
                 ),
               ),
             )
-          else
+          else ...[
+            IconButton(
+              onPressed: () => BibtexManager.show(
+                context,
+                papers: appState.papers,
+                title: appState.selectedTag?.name ?? 'All Papers',
+              ),
+              icon: const Icon(Icons.menu_book_outlined, size: 20),
+              tooltip: 'BibTeX Manager',
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurface
+                  .withValues(alpha: 0.6),
+            ),
             IconButton(
               onPressed: () => appState.toggleConfigMode(),
               icon: const Icon(Icons.settings_outlined, size: 20),
@@ -151,6 +165,7 @@ class _SettingsButton extends StatelessWidget {
                   .onSurface
                   .withValues(alpha: 0.6),
             ),
+          ],
         ],
       ),
     );
