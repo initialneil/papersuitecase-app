@@ -6,20 +6,38 @@ import 'package:provider/provider.dart';
 
 import '../models/entry.dart';
 import '../models/paper.dart';
+import '../models/tag.dart';
 import '../providers/app_state.dart';
 import '../database/database_service.dart';
 import '../services/arxiv_service.dart';
 
-/// Dialog for downloading papers from arXiv
+/// Dialog for downloading papers from arXiv with smart context-aware suggestions.
 class DownloadDialog extends StatefulWidget {
   final String? arxivUrl;
 
-  const DownloadDialog({super.key, this.arxivUrl});
+  /// Current context for smart suggestions
+  final Entry? contextEntry;
+  final String? contextSubfolder;
+  final Tag? contextTag;
+
+  const DownloadDialog({
+    super.key,
+    this.arxivUrl,
+    this.contextEntry,
+    this.contextSubfolder,
+    this.contextTag,
+  });
 
   static Future<void> show(BuildContext context, {String? arxivUrl}) {
+    final appState = context.read<AppState>();
     return showDialog(
       context: context,
-      builder: (context) => DownloadDialog(arxivUrl: arxivUrl),
+      builder: (ctx) => DownloadDialog(
+        arxivUrl: arxivUrl,
+        contextEntry: appState.selectedEntry,
+        contextSubfolder: appState.selectedSubfolder,
+        contextTag: appState.selectedTag,
+      ),
     );
   }
 
@@ -37,10 +55,119 @@ class _DownloadDialogState extends State<DownloadDialog> {
   bool _isDownloading = false;
   String? _error;
 
+  // Tag suggestions
+  List<Tag> _suggestedTags = [];
+  Set<int> _selectedTagIds = {};
+  List<String> _subfolderSuggestions = [];
+
   @override
   void initState() {
     super.initState();
+    _initContext();
     _fetchMetadata();
+  }
+
+  void _initContext() {
+    final appState = context.read<AppState>();
+    final entries = appState.entries;
+
+    // Pre-select entry from context
+    if (widget.contextEntry != null) {
+      _selectedEntry = entries
+          .where((e) => e.id == widget.contextEntry!.id)
+          .firstOrNull;
+    }
+    _selectedEntry ??= entries.isNotEmpty ? entries.first : null;
+
+    // Pre-fill subfolder from context
+    if (widget.contextSubfolder != null) {
+      _subfolderController.text = widget.contextSubfolder!;
+    }
+
+    // Pre-select current tag
+    if (widget.contextTag != null &&
+        !widget.contextTag!.isUntagged &&
+        widget.contextTag!.id != null) {
+      _selectedTagIds.add(widget.contextTag!.id!);
+    }
+
+    // Build tag suggestions and subfolder suggestions
+    _buildSuggestions(appState);
+  }
+
+  void _buildSuggestions(AppState appState) {
+    final allTags = <Tag>[];
+    void collectTags(List<Tag> tags) {
+      for (final t in tags) {
+        allTags.add(t);
+        collectTags(t.children);
+      }
+    }
+    collectTags(appState.tagTree);
+
+    // Score tags: higher score = shown first
+    // Current tag gets highest priority, then tags on papers in current context
+    final tagScores = <int, int>{};
+    for (final t in allTags) {
+      if (t.id == null) continue;
+      tagScores[t.id!] = 0;
+    }
+
+    // Current tag gets top score
+    if (widget.contextTag != null && widget.contextTag!.id != null) {
+      tagScores[widget.contextTag!.id!] = 1000;
+    }
+
+    // Tags from papers in current view get bonus
+    for (final paper in appState.papers) {
+      for (final tag in paper.tags) {
+        if (tag.id != null) {
+          tagScores[tag.id!] = (tagScores[tag.id!] ?? 0) + 10;
+        }
+      }
+    }
+
+    // Sort by score descending, then by name
+    allTags.sort((a, b) {
+      final scoreA = tagScores[a.id] ?? 0;
+      final scoreB = tagScores[b.id] ?? 0;
+      if (scoreA != scoreB) return scoreB.compareTo(scoreA);
+      return a.name.compareTo(b.name);
+    });
+
+    _suggestedTags = allTags.where((t) => !t.isUntagged).toList();
+
+    // Build subfolder suggestions from papers in current context
+    final subfolders = <String, int>{};
+
+    // If we have a tag selected, get subfolders from papers with that tag
+    if (widget.contextTag != null) {
+      for (final paper in appState.papers) {
+        final dir = p.dirname(paper.filePath);
+        if (dir != '.' && dir.isNotEmpty) {
+          subfolders[dir] = (subfolders[dir] ?? 0) + 1;
+        }
+      }
+    }
+    // Also add subfolders from current entry
+    if (_selectedEntry != null) {
+      for (final key in _selectedEntry!.subfolderCounts.keys) {
+        subfolders[key] = (subfolders[key] ?? 0) +
+            _selectedEntry!.subfolderCounts[key]!;
+      }
+    }
+
+    // Sort by frequency
+    final sorted = subfolders.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    _subfolderSuggestions = sorted.map((e) => e.key).toList();
+
+    // Pre-fill subfolder if we have a context tag and a dominant subfolder
+    if (widget.contextSubfolder == null &&
+        widget.contextTag != null &&
+        _subfolderSuggestions.isNotEmpty) {
+      _subfolderController.text = _subfolderSuggestions.first;
+    }
   }
 
   @override
@@ -69,13 +196,9 @@ class _DownloadDialogState extends State<DownloadDialog> {
           _error = 'Could not fetch metadata for arXiv:$arxivId';
         });
       } else {
-        final entries = context.read<AppState>().entries;
         setState(() {
           _metadata = metadata;
           _isFetchingMetadata = false;
-          if (entries.isNotEmpty) {
-            _selectedEntry = entries.first;
-          }
         });
       }
     } catch (e) {
@@ -88,7 +211,6 @@ class _DownloadDialogState extends State<DownloadDialog> {
   }
 
   String _sanitizeFilename(String name) {
-    // Remove or replace characters that are problematic in filenames
     return name
         .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
         .replaceAll(RegExp(r'\s+'), ' ')
@@ -109,33 +231,43 @@ class _DownloadDialogState extends State<DownloadDialog> {
         await Directory(destDir).create(recursive: true);
       }
 
-      // Download PDF bytes
+      // Download PDF
       final response = await http.get(Uri.parse(_metadata!.pdfUrl));
       if (response.statusCode != 200) {
         throw Exception('Download failed with status ${response.statusCode}');
       }
 
-      // Save with sanitized filename
+      // Save file
       final sanitizedTitle = _sanitizeFilename(_metadata!.title);
       final fileName = '$sanitizedTitle.pdf';
       final filePath = p.join(destDir, fileName);
       await File(filePath).writeAsBytes(response.bodyBytes);
 
-      // Insert paper into DB with metadata
+      // Compute relative path for DB
+      final relativePath = p.relative(filePath, from: _selectedEntry!.path);
+
+      // Insert paper into DB
       if (!mounted) return;
       final db = DatabaseService();
       final paper = Paper(
         title: _metadata!.title,
-        filePath: filePath,
+        filePath: relativePath,
         entryId: _selectedEntry!.id!,
         arxivId: _metadata!.arxivId,
         authors: _metadata!.authors,
         abstract: _metadata!.abstract,
-        arxivUrl: _metadata!.pdfUrl.replaceAll('/pdf/', '/abs/').replaceAll('.pdf', ''),
+        arxivUrl: _metadata!.pdfUrl
+            .replaceAll('/pdf/', '/abs/')
+            .replaceAll('.pdf', ''),
       );
-      await db.insertPaper(paper);
+      final paperId = await db.insertPaper(paper);
 
-      // Refresh entries
+      // Assign selected tags
+      for (final tagId in _selectedTagIds) {
+        await db.addTagToPaper(paperId, tagId);
+      }
+
+      // Refresh
       if (!mounted) return;
       final appState = context.read<AppState>();
       await appState.scanAllEntries();
@@ -166,25 +298,29 @@ class _DownloadDialogState extends State<DownloadDialog> {
     return AlertDialog(
       title: const Text('Download from arXiv'),
       content: SizedBox(
-        width: 500,
+        width: 550,
         child: _isFetchingMetadata
             ? const Padding(
                 padding: EdgeInsets.all(32),
                 child: Center(child: CircularProgressIndicator()),
               )
             : _error != null && _metadata == null
-                ? Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))
+                ? Text(_error!,
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.error))
                 : _buildContent(entries, hasEntries),
       ),
       actions: [
         TextButton(
-          onPressed: _isDownloading ? null : () => Navigator.of(context).pop(),
+          onPressed:
+              _isDownloading ? null : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _isDownloading || _metadata == null || !hasEntries
-              ? null
-              : _download,
+          onPressed:
+              _isDownloading || _metadata == null || !hasEntries
+                  ? null
+                  : _download,
           child: _isDownloading
               ? const SizedBox(
                   width: 16,
@@ -199,96 +335,174 @@ class _DownloadDialogState extends State<DownloadDialog> {
 
   Widget _buildContent(List<Entry> entries, bool hasEntries) {
     final meta = _metadata!;
-    final abstractPreview = meta.abstract.length > 300
-        ? '${meta.abstract.substring(0, 300)}...'
+    final abstractPreview = meta.abstract.length > 200
+        ? '${meta.abstract.substring(0, 200)}...'
         : meta.abstract;
+    final colorScheme = Theme.of(context).colorScheme;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Title
-        Text(
-          meta.title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 8),
-
-        // Authors
-        Text(
-          meta.authors,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-              ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 12),
-
-        // Abstract preview
-        if (abstractPreview.isNotEmpty) ...[
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title
           Text(
-            abstractPreview,
+            meta.title,
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          // Authors
+          Text(
+            meta.authors,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                ),
-          ),
-          const SizedBox(height: 16),
-        ],
-
-        // Error message (non-fatal, e.g. download retry)
-        if (_error != null) ...[
-          Text(
-            _error!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                color: colorScheme.onSurface.withValues(alpha: 0.6)),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 8),
-        ],
-
-        const Divider(),
-        const SizedBox(height: 8),
-
-        if (!hasEntries) ...[
-          Text(
-            'Add an entry folder first',
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        ] else ...[
-          // Entry picker
-          const Text('Save to entry:'),
-          const SizedBox(height: 8),
-          DropdownButton<Entry>(
-            value: _selectedEntry,
-            isExpanded: true,
-            items: entries.map((entry) {
-              return DropdownMenuItem(
-                value: entry,
-                child: Text(entry.name),
-              );
-            }).toList(),
-            onChanged: _isDownloading
-                ? null
-                : (entry) => setState(() => _selectedEntry = entry),
-          ),
-          const SizedBox(height: 12),
-
-          // Subfolder field
-          TextField(
-            controller: _subfolderController,
-            decoration: const InputDecoration(
-              labelText: 'Subfolder (optional)',
-              hintText: 'e.g. transformers/attention',
-              border: OutlineInputBorder(),
-              isDense: true,
+          // Abstract
+          if (abstractPreview.isNotEmpty)
+            Text(
+              abstractPreview,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurface.withValues(alpha: 0.5)),
             ),
-            enabled: !_isDownloading,
-          ),
+
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!,
+                style: TextStyle(
+                    color: colorScheme.error, fontSize: 12)),
+          ],
+
+          const Divider(height: 24),
+
+          if (!hasEntries) ...[
+            Text('Add an entry folder first',
+                style: TextStyle(color: colorScheme.error)),
+          ] else ...[
+            // Entry picker
+            Row(
+              children: [
+                Text('Entry:', style: Theme.of(context).textTheme.labelLarge),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButton<Entry>(
+                    value: _selectedEntry,
+                    isExpanded: true,
+                    isDense: true,
+                    items: entries.map((entry) {
+                      return DropdownMenuItem(
+                          value: entry, child: Text(entry.name));
+                    }).toList(),
+                    onChanged: _isDownloading
+                        ? null
+                        : (entry) {
+                            setState(() {
+                              _selectedEntry = entry;
+                              _buildSuggestions(context.read<AppState>());
+                            });
+                          },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Subfolder with suggestions
+            Row(
+              children: [
+                Text('Subfolder:',
+                    style: Theme.of(context).textTheme.labelLarge),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _subfolderController,
+                    decoration: const InputDecoration(
+                      hintText: 'e.g. transformers',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    enabled: !_isDownloading,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+
+            // Subfolder suggestion chips
+            if (_subfolderSuggestions.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: _subfolderSuggestions.take(8).map((sf) {
+                  final isActive = _subfolderController.text == sf;
+                  return ActionChip(
+                    label: Text(sf, style: const TextStyle(fontSize: 11)),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: isActive
+                        ? colorScheme.primaryContainer
+                        : null,
+                    onPressed: _isDownloading
+                        ? null
+                        : () => setState(
+                            () => _subfolderController.text = sf),
+                  );
+                }).toList(),
+              ),
+            ],
+
+            const SizedBox(height: 16),
+
+            // Tag assignment
+            Text('Tags:', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 6),
+            if (_suggestedTags.isNotEmpty)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 120),
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: _suggestedTags.take(20).map((tag) {
+                      final isSelected =
+                          tag.id != null && _selectedTagIds.contains(tag.id);
+                      return FilterChip(
+                        label: Text(tag.name,
+                            style: const TextStyle(fontSize: 11)),
+                        selected: isSelected,
+                        visualDensity: VisualDensity.compact,
+                        onSelected: _isDownloading
+                            ? null
+                            : (selected) {
+                                setState(() {
+                                  if (selected && tag.id != null) {
+                                    _selectedTagIds.add(tag.id!);
+                                  } else if (tag.id != null) {
+                                    _selectedTagIds.remove(tag.id!);
+                                  }
+                                });
+                              },
+                      );
+                    }).toList(),
+                  ),
+                ),
+              )
+            else
+              Text('No tags yet',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurface.withValues(alpha: 0.5))),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
