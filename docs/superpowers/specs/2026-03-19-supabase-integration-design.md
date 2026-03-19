@@ -66,6 +66,7 @@ CREATE TABLE user_papers (
   bibtex TEXT,
   sync_key TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ,
   synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(user_id, sync_key)
 );
@@ -75,6 +76,7 @@ CREATE TABLE user_tags (
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   parent_id BIGINT REFERENCES user_tags(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(user_id, name, parent_id)
 );
 
@@ -145,10 +147,13 @@ This is stored in a new local SQLite column `papers.sync_key` (added via migrati
 ALTER TABLE papers ADD COLUMN sync_key TEXT;
 ALTER TABLE papers ADD COLUMN remote_id BIGINT;
 ALTER TABLE papers ADD COLUMN updated_at TEXT;
+ALTER TABLE papers ADD COLUMN deleted_at TEXT;
 ALTER TABLE papers ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE tags ADD COLUMN remote_id BIGINT;
 ALTER TABLE tags ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1;
 ```
+
+**Post-migration backfill:** After adding `sync_key`, a migration routine computes it for all existing papers using the fallback chain (arxiv_id → content_hash → title+authors hash). This runs once on first app launch after update.
 - `sync_key`: stable dedup key for cloud upsert
 - `remote_id`: corresponding Supabase row ID after sync
 - `updated_at`: timestamp for conflict resolution (set on every local edit)
@@ -206,7 +211,10 @@ ALTER TABLE user_paper_tags ENABLE ROW LEVEL SECURITY;
 CREATE POLICY user_paper_tags_select ON user_paper_tags FOR SELECT
   USING (EXISTS (SELECT 1 FROM user_papers WHERE id = user_paper_id AND user_id = auth.uid()));
 CREATE POLICY user_paper_tags_insert ON user_paper_tags FOR INSERT
-  WITH CHECK (EXISTS (SELECT 1 FROM user_papers WHERE id = user_paper_id AND user_id = auth.uid()));
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM user_papers WHERE id = user_paper_id AND user_id = auth.uid())
+    AND EXISTS (SELECT 1 FROM user_tags WHERE id = user_tag_id AND user_id = auth.uid())
+  );
 CREATE POLICY user_paper_tags_delete ON user_paper_tags FOR DELETE
   USING (EXISTS (SELECT 1 FROM user_papers WHERE id = user_paper_id AND user_id = auth.uid()));
 
