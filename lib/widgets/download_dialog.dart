@@ -59,6 +59,7 @@ class _DownloadDialogState extends State<DownloadDialog> {
   List<Tag> _suggestedTags = [];
   Set<int> _selectedTagIds = {};
   List<String> _subfolderSuggestions = [];
+  bool _isCustomSubfolder = false;
 
   @override
   void initState() {
@@ -162,9 +163,14 @@ class _DownloadDialogState extends State<DownloadDialog> {
       ..sort((a, b) => b.value.compareTo(a.value));
     _subfolderSuggestions = sorted.map((e) => e.key).toList();
 
-    // Pre-fill subfolder if we have a context tag and a dominant subfolder
-    if (widget.contextSubfolder == null &&
-        widget.contextTag != null &&
+    // Pre-fill subfolder
+    if (widget.contextSubfolder != null) {
+      // If context subfolder is in suggestions, select it; otherwise custom mode
+      if (!_subfolderSuggestions.contains(widget.contextSubfolder)) {
+        _subfolderSuggestions.insert(0, widget.contextSubfolder!);
+      }
+      _subfolderController.text = widget.contextSubfolder!;
+    } else if (widget.contextTag != null &&
         _subfolderSuggestions.isNotEmpty) {
       _subfolderController.text = _subfolderSuggestions.first;
     }
@@ -414,51 +420,81 @@ class _DownloadDialogState extends State<DownloadDialog> {
             ),
             const SizedBox(height: 12),
 
-            // Subfolder with suggestions
+            // Subfolder dropdown with custom option
             Row(
               children: [
                 Text('Subfolder:',
                     style: Theme.of(context).textTheme.labelLarge),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: TextField(
-                    controller: _subfolderController,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. transformers',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    ),
-                    enabled: !_isDownloading,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
+                  child: _isCustomSubfolder
+                      ? TextField(
+                          controller: _subfolderController,
+                          autofocus: true,
+                          decoration: InputDecoration(
+                            hintText: 'Type subfolder name...',
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 8),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.close, size: 16),
+                              onPressed: () => setState(() {
+                                _isCustomSubfolder = false;
+                                _subfolderController.clear();
+                              }),
+                            ),
+                          ),
+                          enabled: !_isDownloading,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        )
+                      : DropdownButton<String>(
+                          value: _subfolderSuggestions
+                                  .contains(_subfolderController.text)
+                              ? _subfolderController.text
+                              : '',
+                          isExpanded: true,
+                          isDense: true,
+                          items: [
+                            const DropdownMenuItem(
+                              value: '',
+                              child: Text('(root)',
+                                  style: TextStyle(
+                                      fontStyle: FontStyle.italic)),
+                            ),
+                            ..._subfolderSuggestions.map((sf) {
+                              return DropdownMenuItem(
+                                  value: sf, child: Text(sf));
+                            }),
+                            const DropdownMenuItem(
+                              value: '__custom__',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.edit, size: 14),
+                                  SizedBox(width: 6),
+                                  Text('New subfolder...'),
+                                ],
+                              ),
+                            ),
+                          ],
+                          onChanged: _isDownloading
+                              ? null
+                              : (value) {
+                                  if (value == '__custom__') {
+                                    setState(() {
+                                      _isCustomSubfolder = true;
+                                      _subfolderController.clear();
+                                    });
+                                  } else {
+                                    setState(() {
+                                      _subfolderController.text = value ?? '';
+                                    });
+                                  }
+                                },
+                        ),
                 ),
               ],
             ),
-
-            // Subfolder suggestion chips
-            if (_subfolderSuggestions.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: _subfolderSuggestions.take(8).map((sf) {
-                  final isActive = _subfolderController.text == sf;
-                  return ActionChip(
-                    label: Text(sf, style: const TextStyle(fontSize: 11)),
-                    visualDensity: VisualDensity.compact,
-                    backgroundColor: isActive
-                        ? colorScheme.primaryContainer
-                        : null,
-                    onPressed: _isDownloading
-                        ? null
-                        : () => setState(
-                            () => _subfolderController.text = sf),
-                  );
-                }).toList(),
-              ),
-            ],
 
             const SizedBox(height: 16),
 
