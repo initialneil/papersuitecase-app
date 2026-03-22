@@ -23,7 +23,7 @@ class RecommendedPaper {
 
   factory RecommendedPaper.fromMap(Map<String, dynamic> map) {
     return RecommendedPaper(
-      catalogId: map['catalog_id'] as String,
+      catalogId: map['catalog_id'].toString(),
       arxivId: map['arxiv_id'] as String?,
       title: map['title'] as String? ?? 'Untitled',
       authors: map['authors'] as String?,

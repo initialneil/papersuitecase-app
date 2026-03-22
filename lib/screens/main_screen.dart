@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:window_manager/window_manager.dart';
+
 import '../providers/app_state.dart';
 import '../widgets/tag_sidebar.dart';
 import '../widgets/search_bar.dart';
@@ -26,6 +28,10 @@ class CloseIntent extends Intent {
   const CloseIntent();
 }
 
+class CloseWindowIntent extends Intent {
+  const CloseWindowIntent();
+}
+
 class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
@@ -39,6 +45,7 @@ class _MainScreenState extends State<MainScreen> {
     return Shortcuts(
       shortcuts: <ShortcutActivator, Intent>{
         const SingleActivator(LogicalKeyboardKey.escape): const CloseIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyW, meta: true): const CloseWindowIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -50,6 +57,12 @@ class _MainScreenState extends State<MainScreen> {
               } else if (appState.isConfigMode) {
                 appState.toggleConfigMode();
               }
+              return null;
+            },
+          ),
+          CloseWindowIntent: CallbackAction<CloseWindowIntent>(
+            onInvoke: (intent) {
+              windowManager.close();
               return null;
             },
           ),
