@@ -6,6 +6,10 @@ class AppDelegate: FlutterAppDelegate {
   private var sparklePlugin: SparklePlugin?
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
+    // Call super FIRST so FlutterAppDelegate registers lifecycle delegates
+    // (including app_links for OAuth deep link handling)
+    super.applicationDidFinishLaunching(notification)
+
     let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
     let channel = FlutterMethodChannel(
       name: "com.papersuitecase/sparkle",
