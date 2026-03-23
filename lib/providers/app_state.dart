@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/material.dart' show ThemeMode;
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -107,6 +109,14 @@ class AppState extends ChangeNotifier {
   bool _isChatLoading = false;
   bool _showChatPanel = false;
 
+  // Update state
+  static const _sparkleChannel = MethodChannel('com.papersuitecase/sparkle');
+  bool _updateAvailable = false;
+  String? _latestVersion;
+  String? _updateCheckError;
+  bool _hasSeenUpdateBadge = false;
+  String _currentVersion = '';
+
   // Getters
   List<Paper> get papers => _papers;
   List<Tag> get tagTree => _tagTree;
@@ -150,6 +160,13 @@ class AppState extends ChangeNotifier {
   List<ChatMessage> getChatHistory(int paperId) =>
       _chatHistories[paperId] ?? [];
 
+  // Update Getters
+  bool get updateAvailable => _updateAvailable;
+  String? get latestVersion => _latestVersion;
+  String? get updateCheckError => _updateCheckError;
+  String get currentVersion => _currentVersion;
+  bool get showUpdateBadge => _updateAvailable && !_hasSeenUpdateBadge;
+
   // Auth Getters
   User? get currentUser => _currentUser;
   Map<String, dynamic>? get userProfile => _userProfile;
@@ -173,6 +190,8 @@ class AppState extends ChangeNotifier {
       await DatabaseService.initialize();
       _scannerService = EntryScannerService(_db, _pdfService);
       _syncService = SyncService(_db);
+      _setupUpdateChannel();
+      await _loadUpdateState();
       await _loadSettings();
 
       _entries = await _db.getAllEntries();
@@ -1229,5 +1248,70 @@ class AppState extends ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  // ── Update Methods ──
+
+  void markUpdateBadgeSeen() {
+    _hasSeenUpdateBadge = true;
+    notifyListeners();
+  }
+
+  Future<void> checkForUpdates() async {
+    try {
+      _updateCheckError = null;
+      notifyListeners();
+      await _sparkleChannel.invokeMethod('checkForUpdates');
+    } catch (e) {
+      _updateCheckError = 'Could not check for updates';
+      notifyListeners();
+    }
+  }
+
+  void _setupUpdateChannel() {
+    _sparkleChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'onUpdateAvailable':
+          final version = (call.arguments as Map)['version'] as String;
+          if (version != _latestVersion) {
+            _hasSeenUpdateBadge = false;
+          }
+          _latestVersion = version;
+          _updateAvailable = true;
+          _updateCheckError = null;
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('latestVersion', version);
+          await prefs.setBool('updateAvailable', true);
+          notifyListeners();
+        case 'onNoUpdateAvailable':
+          _updateAvailable = false;
+          _latestVersion = null;
+          _updateCheckError = null;
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('latestVersion');
+          await prefs.remove('updateAvailable');
+          notifyListeners();
+        case 'onUpdateCheckError':
+          final error = (call.arguments as Map?)?['error'] as String?;
+          _updateCheckError = error ?? 'Could not check for updates';
+          notifyListeners();
+      }
+    });
+  }
+
+  Future<void> _loadUpdateState() async {
+    final info = await PackageInfo.fromPlatform();
+    _currentVersion = info.version;
+
+    final prefs = await SharedPreferences.getInstance();
+    final cachedVersion = prefs.getString('latestVersion');
+    final cachedAvailable = prefs.getBool('updateAvailable') ?? false;
+    if (cachedAvailable && cachedVersion != null && cachedVersion != _currentVersion) {
+      _latestVersion = cachedVersion;
+      _updateAvailable = true;
+    } else {
+      await prefs.remove('latestVersion');
+      await prefs.remove('updateAvailable');
+    }
   }
 }

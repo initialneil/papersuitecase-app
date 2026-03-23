@@ -331,6 +331,76 @@ class SettingsView extends StatelessWidget {
                 ],
               ),
             ),
+
+            const SizedBox(height: 32),
+
+            _SectionHeader(title: 'About'),
+            _SettingBox(
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                        const SizedBox(width: 12),
+                        Text('Paper Suitecase v${appState.currentVersion}'),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          appState.updateAvailable
+                              ? Icons.system_update_outlined
+                              : Icons.check_circle_outline,
+                          size: 20,
+                          color: appState.updateAvailable
+                              ? const Color(0xFF4EB8A1)
+                              : appState.updateCheckError != null
+                                  ? Theme.of(context).colorScheme.error
+                                  : Theme.of(context).colorScheme.outline,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            appState.updateAvailable
+                                ? 'Version ${appState.latestVersion} available'
+                                : appState.updateCheckError ?? 'Up to date',
+                            style: TextStyle(
+                              color: appState.updateAvailable
+                                  ? const Color(0xFF4EB8A1)
+                                  : appState.updateCheckError != null
+                                      ? Theme.of(context).colorScheme.error
+                                      : null,
+                              fontWeight: appState.updateAvailable
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () => appState.checkForUpdates(),
+                          child: Text(
+                            appState.updateAvailable
+                                ? 'Install Update'
+                                : 'Check for Updates',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         );
       },

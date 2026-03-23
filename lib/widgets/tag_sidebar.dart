@@ -194,14 +194,34 @@ class _SettingsButton extends StatelessWidget {
                   .onSurface
                   .withValues(alpha: 0.6),
             ),
-            IconButton(
-              onPressed: () => appState.toggleConfigMode(),
-              icon: const Icon(Icons.settings_outlined, size: 20),
-              tooltip: 'Settings',
-              color: Theme.of(context)
-                  .colorScheme
-                  .onSurface
-                  .withValues(alpha: 0.6),
+            Stack(
+              children: [
+                IconButton(
+                  onPressed: () {
+                    appState.markUpdateBadgeSeen();
+                    appState.toggleConfigMode();
+                  },
+                  icon: const Icon(Icons.settings_outlined, size: 20),
+                  tooltip: 'Settings',
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.6),
+                ),
+                if (appState.showUpdateBadge)
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF4EB8A1),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
         ],
