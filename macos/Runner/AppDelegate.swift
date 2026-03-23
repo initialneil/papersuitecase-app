@@ -1,13 +1,12 @@
 import Cocoa
 import FlutterMacOS
+import app_links
 
 @main
 class AppDelegate: FlutterAppDelegate {
   private var sparklePlugin: SparklePlugin?
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
-    // Call super FIRST so FlutterAppDelegate registers lifecycle delegates
-    // (including app_links for OAuth deep link handling)
     super.applicationDidFinishLaunching(notification)
 
     let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
@@ -18,6 +17,18 @@ class AppDelegate: FlutterAppDelegate {
     sparklePlugin = SparklePlugin(channel: channel)
     channel.setMethodCallHandler(sparklePlugin!.handle)
     sparklePlugin!.start()
+  }
+
+  // Handle URLs opened via custom URL scheme (OAuth callbacks)
+  override func application(_ application: NSApplication, open urls: [URL]) {
+    for url in urls {
+      NSLog("AppDelegate: open URL: \(url.absoluteString)")
+      AppLinks.shared.handleLink(link: url.absoluteString)
+    }
+    NSApp.activate(ignoringOtherApps: true)
+    mainFlutterWindow?.makeKeyAndOrderFront(self)
+
+    super.application(application, open: urls)
   }
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
