@@ -1,5 +1,8 @@
 import 'dart:io';
+import 'dart:ui' show PointerChange;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import '../models/paper.dart';
@@ -23,34 +26,117 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
   final PdfViewerController _controller = PdfViewerController();
   final GlobalKey<SfPdfViewerState> _pdfViewerKey = GlobalKey();
 
-  // TODO: Remove in Task 9 — reference indexing removed (ReferenceService deleted)
-  bool _isIndexing = false;
-  OverlayEntry? _tooltipEntry;
-
   // Annotation mode
   bool _isHighlightMode = false;
   bool _isUnderlineMode = false;
 
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
-  void didUpdateWidget(EmbeddedPdfViewer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-  }
+  // Track selected text for right-click context menu
+  String? _selectedText;
 
   @override
   void dispose() {
-    _hideTooltip();
     _controller.dispose();
     super.dispose();
   }
 
-  void _hideTooltip() {
-    _tooltipEntry?.remove();
-    _tooltipEntry = null;
+  void _showContextMenu(BuildContext context, Offset position) {
+    final appState = context.read<AppState>();
+    final text = _selectedText;
+
+    final items = <PopupMenuEntry<String>>[
+      if (text != null && text.isNotEmpty) ...[
+        const PopupMenuItem(
+          value: 'copy',
+          child: Row(
+            children: [
+              Icon(Icons.copy, size: 18),
+              SizedBox(width: 8),
+              Text('Copy'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'search',
+          child: Row(
+            children: [
+              const Icon(Icons.search, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Search "${text.length > 30 ? '${text.substring(0, 30)}...' : text}"',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+      ],
+      const PopupMenuItem(
+        value: 'zoom_in',
+        child: Row(
+          children: [
+            Icon(Icons.zoom_in, size: 18),
+            SizedBox(width: 8),
+            Text('Zoom In'),
+          ],
+        ),
+      ),
+      const PopupMenuItem(
+        value: 'zoom_out',
+        child: Row(
+          children: [
+            Icon(Icons.zoom_out, size: 18),
+            SizedBox(width: 8),
+            Text('Zoom Out'),
+          ],
+        ),
+      ),
+      const PopupMenuItem(
+        value: 'zoom_reset',
+        child: Row(
+          children: [
+            Icon(Icons.fit_screen_outlined, size: 18),
+            SizedBox(width: 8),
+            Text('Reset Zoom'),
+          ],
+        ),
+      ),
+    ];
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx + 1,
+        position.dy + 1,
+      ),
+      items: items,
+    ).then((value) {
+      if (value == null) return;
+      switch (value) {
+        case 'copy':
+          if (text != null) {
+            Clipboard.setData(ClipboardData(text: text));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Copied to clipboard'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+          }
+        case 'search':
+          if (text != null) {
+            appState.setSearchQuery(text.trim());
+            widget.onBack();
+          }
+        case 'zoom_in':
+          _controller.zoomLevel = _controller.zoomLevel + 0.25;
+        case 'zoom_out':
+          _controller.zoomLevel = (_controller.zoomLevel - 0.25).clamp(0.5, 5.0);
+        case 'zoom_reset':
+          _controller.zoomLevel = 1.0;
+      }
+    });
   }
 
   @override
@@ -95,31 +181,37 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
           ),
           IconButton(
             icon: const Icon(Icons.zoom_in),
+            tooltip: 'Zoom In',
             onPressed: () =>
                 _controller.zoomLevel = _controller.zoomLevel + 0.25,
           ),
           IconButton(
             icon: const Icon(Icons.zoom_out),
+            tooltip: 'Zoom Out',
             onPressed: () =>
-                _controller.zoomLevel = _controller.zoomLevel - 0.25,
+                _controller.zoomLevel = (_controller.zoomLevel - 0.25).clamp(0.5, 5.0),
           ),
         ],
       ),
       body: Stack(
         children: [
-          GestureDetector(
+          Listener(
+            onPointerDown: (event) {
+              // Right-click (secondary button)
+              if (event.buttons == kSecondaryMouseButton) {
+                _showContextMenu(context, event.position);
+              }
+            },
             child: SfPdfViewer.file(
               File(context.read<AppState>().resolveFullPath(widget.paper)),
               key: _pdfViewerKey,
               controller: _controller,
-              enableHyperlinkNavigation: false, // Prevent automatic jumping
+              enableHyperlinkNavigation: false,
               onTextSelectionChanged: (details) {
+                _selectedText = details.selectedText;
                 if (_isHighlightMode || _isUnderlineMode) {
-                  // Apply annotation
                   if (details.selectedText != null &&
                       details.selectedText!.isNotEmpty) {
-                    // Note: Syncfusion requires premium license for annotation features
-                    // For now, we'll just log it
                     debugPrint(
                       '${_isHighlightMode ? "Highlight" : "Underline"}: ${details.selectedText}',
                     );
@@ -128,31 +220,6 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
               },
             ),
           ),
-          if (_isIndexing)
-            Positioned(
-              bottom: 16,
-              right: 16,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Indexing references...',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
           if (_isHighlightMode || _isUnderlineMode)
             Positioned(
               top: 8,
@@ -172,35 +239,6 @@ class _EmbeddedPdfViewerState extends State<EmbeddedPdfViewer> {
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          // Instruction banner
-          if (!_isHighlightMode && !_isUnderlineMode && !_isIndexing)
-            Positioned(
-              bottom: 8,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Card(
-                  color: Colors.black87,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.mouse, size: 16, color: Colors.white70),
-                        SizedBox(width: 8),
-                        Text(
-                          'Right-click on any reference to view paper card',
-                          style: TextStyle(color: Colors.white70, fontSize: 12),
-                        ),
-                      ],
                     ),
                   ),
                 ),
