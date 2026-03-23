@@ -7,6 +7,9 @@ class SupabaseService {
   static const _redirectUrl = 'io.supabase.papersuitecase://login-callback';
 
   /// Initialize Supabase. Call once at app startup.
+  /// Deep links (OAuth callbacks) are handled automatically by supabase_flutter
+  /// via the app_links plugin. The AppDelegate calls super.applicationDidFinishLaunching()
+  /// which registers the app_links Apple Event handler for URL schemes.
   static Future<void> initialize() async {
     await Supabase.initialize(
       url: _supabaseUrl,
