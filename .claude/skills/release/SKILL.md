@@ -8,19 +8,19 @@ user_invocable: true
 
 Build and publish PaperSuitcase to GitHub Releases AND update the Sparkle appcast (which lives in `docs/` of the same repo) so existing installs auto-update.
 
-## Repo
+**All commands below assume the current working directory is the repo root.** This skill uses only repo-relative paths so it stays portable across machines. If your cwd is elsewhere, start with `cd` into the repo.
 
-Single monorepo: `/Users/neil/Playground/paper_suitecase_project/papersuitcase` (remote: `initialneil/papersuitcase`). Contains Flutter source at the root and the GitHub Pages website at `docs/`. Pages is deployed by `.github/workflows/pages.yml` on pushes that touch `docs/`. The appcast is served at `https://initialneil.github.io/papersuitcase/appcast.xml`.
+## Repo layout
+
+Single monorepo `initialneil/papersuitcase`. Flutter source at the root, website and appcast at `docs/`. Pages deploys via `.github/workflows/pages.yml` on pushes touching `docs/`. Appcast is served at `https://initialneil.github.io/papersuitcase/appcast.xml`.
 
 ## Tools
 
-- `sign_update` for Sparkle EdDSA signing: `/Users/neil/Playground/paper_suitecase_project/papersuitcase/macos/Pods/Sparkle/bin/sign_update`
+- `sign_update` for Sparkle EdDSA signing — vendored in `macos/Pods/Sparkle/bin/sign_update`
 - `create-dmg` (homebrew)
 - `gh` CLI
 
 ## Arguments
-
-The user provides a bump type as the argument:
 
 - `patch` or no argument — Patch bump (e.g. 1.1.0 → 1.1.1). **Replaces** the existing release with the same minor version on GitHub (deletes old patch release first, then creates new one with same minor tag).
 - `minor` — Minor bump (e.g. 1.1.0 → 1.2.0). Creates a **new** release.
@@ -49,8 +49,6 @@ Edit the `version:` line in `pubspec.yaml` to the new version string.
 
 ### 4. Build
 
-Run from the papersuitcase directory:
-
 ```bash
 flutter clean && flutter pub get && flutter build macos --release
 ```
@@ -59,19 +57,17 @@ If the build fails, stop and report the error.
 
 ### 5. Package
 
-The built app is at: `build/macos/Build/Products/Release/PaperSuitcase.app`
+The built app is at `build/macos/Build/Products/Release/PaperSuitcase.app`. Create a DMG and a ZIP with filenames using `vMAJOR.MINOR.PATCH`.
 
-Create both a DMG and a ZIP. Use version format `vMAJOR.MINOR.PATCH` for filenames.
-
-**ZIP** (build it inside the Release dir, then move to papersuitcase root):
+**ZIP** (build it inside the Release dir, then move to repo root):
 ```bash
-cd build/macos/Build/Products/Release && zip -r -y -q "PaperSuitcase-macOS-v${VERSION}.zip" PaperSuitcase.app
-mv build/macos/Build/Products/Release/PaperSuitcase-macOS-v${VERSION}.zip ./
+( cd build/macos/Build/Products/Release && zip -r -y -q "PaperSuitcase-macOS-v${VERSION}.zip" PaperSuitcase.app )
+mv "build/macos/Build/Products/Release/PaperSuitcase-macOS-v${VERSION}.zip" .
 ```
 
-**DMG** (run from papersuitcase directory — `create-dmg` resolves the background path relative to cwd, so this MUST be run with cwd=papersuitcase):
+**DMG** — must run with cwd at repo root (`create-dmg` resolves the background path relative to cwd):
 ```bash
-cd /Users/neil/Playground/paper_suitecase_project/papersuitcase && create-dmg \
+create-dmg \
   --volname "PaperSuitcase" \
   --background "installer/dmg-background.png" \
   --window-pos 200 120 \
@@ -84,24 +80,26 @@ cd /Users/neil/Playground/paper_suitecase_project/papersuitcase && create-dmg \
   "build/macos/Build/Products/Release/PaperSuitcase.app"
 ```
 
-If create-dmg fails partway, clean up `rw.*.dmg` leftovers and stale `/Volumes/dmg.*` mounts before retrying:
+If create-dmg fails partway, clean up leftovers before retrying:
 ```bash
 hdiutil detach /Volumes/dmg.* 2>/dev/null; rm -f rw.*.dmg build/macos/Build/Products/Release/rw.*.dmg
 ```
 
 ### 6. Sign the ZIP for Sparkle
 
-Run sign_update on the ZIP. It outputs `sparkle:edSignature="..." length=...`:
-
 ```bash
-/Users/neil/Playground/paper_suitecase_project/papersuitcase/macos/Pods/Sparkle/bin/sign_update PaperSuitcase-macOS-v${VERSION}.zip
+./macos/Pods/Sparkle/bin/sign_update "PaperSuitcase-macOS-v${VERSION}.zip"
 ```
 
-Capture both the signature and the length value — you'll need them in step 9.
+It prints `sparkle:edSignature="..." length=...`. Capture both values — needed in step 8.
 
 ### 7. Generate release notes
 
-Run `git log <last-tag>..HEAD --oneline` from the papersuitcase directory. Summarize the changes into release notes with sections like "New Features", "Fixes", "Changes" as appropriate. Always end with:
+```bash
+git log "$(git describe --tags --abbrev=0)..HEAD" --oneline
+```
+
+Summarize into release notes with sections like "New Features", "Fixes", "Changes" as appropriate. Always end with:
 
 ```markdown
 ### Installation
@@ -117,11 +115,10 @@ Run `git log <last-tag>..HEAD --oneline` from the papersuitcase directory. Summa
 
 Edit `docs/appcast.xml`.
 
-**For patch releases**: REPLACE the existing top `<item>` (the most recent patch in the same minor series) with the new entry. Do not keep multiple patches of the same minor.
+- **Patch releases**: REPLACE the existing top `<item>` (the most recent patch in the same minor series). Do not accumulate multiple patches of the same minor.
+- **Minor/major releases**: PREPEND a new `<item>` at the top of the channel, keeping older items below.
 
-**For minor/major releases**: PREPEND a new `<item>` at the top of the channel, keeping older items below.
-
-The new `<item>` template (substitute VERSION, BUILD_NUMBER, PUB_DATE, NOTES_HTML, LENGTH, SIGNATURE):
+Template (substitute VERSION, BUILD_NUMBER, PUB_DATE, NOTES_HTML, LENGTH, SIGNATURE):
 
 ```xml
     <item>
@@ -145,52 +142,50 @@ The new `<item>` template (substitute VERSION, BUILD_NUMBER, PUB_DATE, NOTES_HTM
 
 - `BUILD_NUMBER` is the build number from `pubspec.yaml` (the part after `+`).
 - `PUB_DATE` is RFC 822 format (e.g. `Thu, 09 Apr 2026 13:46:00 +0800`).
-- `NOTES_HTML` is a short HTML version of the release notes (a `<ul>` of bullet points works well — match the tone of existing entries in the file).
+- `NOTES_HTML` is a short HTML version of the release notes (a `<ul>` of bullet points works well — match the tone of existing entries).
 - `LENGTH` and `SIGNATURE` come from step 6.
 
-### 9. Commit version bump, appcast, and any other changes
+### 9. Commit
 
-Stage `pubspec.yaml`, `docs/appcast.xml`, and any other changes that are part of this release. Commit with a meaningful message describing what's in the release. The Pages workflow will auto-deploy the new appcast when `docs/` is pushed.
+Stage `pubspec.yaml`, `docs/appcast.xml`, and any other changes that are part of this release. Commit with a meaningful message describing what's in the release. The Pages workflow auto-deploys the new appcast when `docs/` is pushed.
 
 ### 10. Tag and release
 
-**For patch releases** (replace existing minor release):
-1. Find the existing release tag matching `vMAJOR.MINOR.*` using `gh release list --repo initialneil/papersuitcase`
-2. If found, delete that release AND its git tag:
+**Patch releases** (replace existing minor release):
+1. Find the existing tag matching `vMAJOR.MINOR.*` using `gh release list`
+2. Delete that release AND its git tag:
    ```bash
-   gh release delete vOLD_TAG --repo initialneil/papersuitcase --yes --cleanup-tag
+   gh release delete vOLD_TAG --yes --cleanup-tag
    ```
-3. Create the new tag, push tag and HEAD:
+3. Create the new tag and push:
    ```bash
-   git tag "vMAJOR.MINOR.PATCH"
-   git push origin "vMAJOR.MINOR.PATCH"
+   git tag "v${VERSION}"
+   git push origin "v${VERSION}"
    git push origin HEAD
    ```
 
-**For minor/major releases**:
+**Minor/major releases**:
 ```bash
-git tag "vMAJOR.MINOR.PATCH"
-git push origin "vMAJOR.MINOR.PATCH"
+git tag "v${VERSION}"
+git push origin "v${VERSION}"
 git push origin HEAD
 ```
 
-Then create the release with assets:
+Create the release with assets:
 ```bash
-gh release create "vMAJOR.MINOR.PATCH" \
-  --repo initialneil/papersuitcase \
-  --title "Paper Suitcase vMAJOR.MINOR.PATCH" \
+gh release create "v${VERSION}" \
+  --title "Paper Suitcase v${VERSION}" \
   --notes "RELEASE_NOTES" \
-  "PaperSuitcase-macOS-vMAJOR.MINOR.PATCH.dmg" \
-  "PaperSuitcase-macOS-vMAJOR.MINOR.PATCH.zip"
+  "PaperSuitcase-macOS-v${VERSION}.dmg" \
+  "PaperSuitcase-macOS-v${VERSION}.zip"
 ```
 
 ### 11. Clean up and report
 
-Remove the local DMG and ZIP files:
 ```bash
-rm PaperSuitcase-macOS-v${VERSION}.dmg PaperSuitcase-macOS-v${VERSION}.zip
+rm "PaperSuitcase-macOS-v${VERSION}.dmg" "PaperSuitcase-macOS-v${VERSION}.zip"
 ```
 
 Report to the user:
-- Release URL: `https://github.com/initialneil/papersuitcase/releases/tag/vVERSION`
-- Note that the Pages workflow will auto-deploy the updated appcast in a minute or two, so existing installs will see the update via Sparkle
+- Release URL: `https://github.com/initialneil/papersuitcase/releases/tag/v${VERSION}`
+- Note that the Pages workflow will auto-deploy the updated appcast in a minute or two, so existing installs will see the update via Sparkle.

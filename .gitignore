@@ -50,3 +50,6 @@ supabase/.temp/
 
 # Logo drafts
 logo_drafts/
+
+# Claude Code personal overrides (skills and SKILL.md are tracked)
+.claude/settings.local.json
