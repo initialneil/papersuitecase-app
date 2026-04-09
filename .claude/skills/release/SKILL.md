@@ -10,11 +10,11 @@ Build and publish PaperSuitcase to GitHub Releases AND update the Sparkle appcas
 
 ## Repo
 
-Single monorepo: `/Users/neil/Playground/paper_suitecase_project/PaperFlutter` (remote: `initialneil/papersuitcase`). Contains Flutter source at the root and the GitHub Pages website at `docs/`. Pages is deployed by `.github/workflows/pages.yml` on pushes that touch `docs/`. The appcast is served at `https://initialneil.github.io/papersuitcase/appcast.xml`.
+Single monorepo: `/Users/neil/Playground/paper_suitecase_project/papersuitcase` (remote: `initialneil/papersuitcase`). Contains Flutter source at the root and the GitHub Pages website at `docs/`. Pages is deployed by `.github/workflows/pages.yml` on pushes that touch `docs/`. The appcast is served at `https://initialneil.github.io/papersuitcase/appcast.xml`.
 
 ## Tools
 
-- `sign_update` for Sparkle EdDSA signing: `/Users/neil/Playground/paper_suitecase_project/PaperFlutter/macos/Pods/Sparkle/bin/sign_update`
+- `sign_update` for Sparkle EdDSA signing: `/Users/neil/Playground/paper_suitecase_project/papersuitcase/macos/Pods/Sparkle/bin/sign_update`
 - `create-dmg` (homebrew)
 - `gh` CLI
 
@@ -49,7 +49,7 @@ Edit the `version:` line in `pubspec.yaml` to the new version string.
 
 ### 4. Build
 
-Run from the PaperFlutter directory:
+Run from the papersuitcase directory:
 
 ```bash
 flutter clean && flutter pub get && flutter build macos --release
@@ -63,15 +63,15 @@ The built app is at: `build/macos/Build/Products/Release/PaperSuitcase.app`
 
 Create both a DMG and a ZIP. Use version format `vMAJOR.MINOR.PATCH` for filenames.
 
-**ZIP** (build it inside the Release dir, then move to PaperFlutter root):
+**ZIP** (build it inside the Release dir, then move to papersuitcase root):
 ```bash
 cd build/macos/Build/Products/Release && zip -r -y -q "PaperSuitcase-macOS-v${VERSION}.zip" PaperSuitcase.app
 mv build/macos/Build/Products/Release/PaperSuitcase-macOS-v${VERSION}.zip ./
 ```
 
-**DMG** (run from PaperFlutter directory — `create-dmg` resolves the background path relative to cwd, so this MUST be run with cwd=PaperFlutter):
+**DMG** (run from papersuitcase directory — `create-dmg` resolves the background path relative to cwd, so this MUST be run with cwd=papersuitcase):
 ```bash
-cd /Users/neil/Playground/paper_suitecase_project/PaperFlutter && create-dmg \
+cd /Users/neil/Playground/paper_suitecase_project/papersuitcase && create-dmg \
   --volname "PaperSuitcase" \
   --background "installer/dmg-background.png" \
   --window-pos 200 120 \
@@ -94,14 +94,14 @@ hdiutil detach /Volumes/dmg.* 2>/dev/null; rm -f rw.*.dmg build/macos/Build/Prod
 Run sign_update on the ZIP. It outputs `sparkle:edSignature="..." length=...`:
 
 ```bash
-/Users/neil/Playground/paper_suitecase_project/PaperFlutter/macos/Pods/Sparkle/bin/sign_update PaperSuitcase-macOS-v${VERSION}.zip
+/Users/neil/Playground/paper_suitecase_project/papersuitcase/macos/Pods/Sparkle/bin/sign_update PaperSuitcase-macOS-v${VERSION}.zip
 ```
 
 Capture both the signature and the length value — you'll need them in step 9.
 
 ### 7. Generate release notes
 
-Run `git log <last-tag>..HEAD --oneline` from the PaperFlutter directory. Summarize the changes into release notes with sections like "New Features", "Fixes", "Changes" as appropriate. Always end with:
+Run `git log <last-tag>..HEAD --oneline` from the papersuitcase directory. Summarize the changes into release notes with sections like "New Features", "Fixes", "Changes" as appropriate. Always end with:
 
 ```markdown
 ### Installation
