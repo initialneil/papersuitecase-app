@@ -1,18 +1,18 @@
 <p align="center">
-  <img src="assets/logo.png" alt="PaperSuitecase" width="128">
+  <img src="assets/logo.png" alt="PaperSuitcase" width="128">
 </p>
 
-<h1 align="center">PaperSuitecase</h1>
+<h1 align="center">PaperSuitcase</h1>
 
 <p align="center">
   A desktop app for managing academic PDF papers with hierarchical tagging, full-text search, arXiv integration, and BibTeX support.
 </p>
 
 <p align="center">
-  <a href="https://initialneil.github.io/papersuitecase-app/">Website</a>
+  <a href="https://initialneil.github.io/papersuitcase-app/">Website</a>
 </p>
 
-![PaperSuitecase main interface](assets/screenshot-main.png)
+![PaperSuitcase main interface](assets/screenshot-main.png)
 
 ## Features
 

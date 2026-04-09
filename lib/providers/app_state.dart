@@ -110,7 +110,7 @@ class AppState extends ChangeNotifier {
   bool _showChatPanel = false;
 
   // Update state
-  static const _sparkleChannel = MethodChannel('com.papersuitecase/sparkle');
+  static const _sparkleChannel = MethodChannel('com.papersuitcase/sparkle');
   bool _updateAvailable = false;
   String? _latestVersion;
   String? _updateCheckError;

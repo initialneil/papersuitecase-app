@@ -11,7 +11,7 @@ class AppDelegate: FlutterAppDelegate {
 
     let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
     let channel = FlutterMethodChannel(
-      name: "com.papersuitecase/sparkle",
+      name: "com.papersuitcase/sparkle",
       binaryMessenger: controller.engine.binaryMessenger
     )
     sparklePlugin = SparklePlugin(channel: channel)

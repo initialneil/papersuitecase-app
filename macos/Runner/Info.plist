@@ -29,7 +29,7 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>SUFeedURL</key>
-	<string>https://initialneil.github.io/papersuitecase/appcast.xml</string>
+	<string>https://initialneil.github.io/papersuitcase/appcast.xml</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
 	<key>SUAutomaticallyUpdate</key>
@@ -42,10 +42,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>io.supabase.papersuitecase</string>
+			<string>io.supabase.papersuitcase</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>io.supabase.papersuitecase</string>
+				<string>io.supabase.papersuitcase</string>
 			</array>
 		</dict>
 	</array>

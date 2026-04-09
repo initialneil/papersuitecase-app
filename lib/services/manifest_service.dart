@@ -4,7 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 class ManifestService {
-  static const String _cacheDir = '.papersuitecase';
+  static const String _cacheDir = '.papersuitcase';
   static const String _manifestFile = 'manifest.json';
   static const String _thumbnailsDir = 'thumbnails';
   static const String _textsDir = 'texts';
@@ -13,7 +13,7 @@ class ManifestService {
   /// Per-entry locks to prevent concurrent manifest reads/writes
   static final Map<String, Future<void>> _locks = {};
 
-  /// Get the .papersuitecase directory path for an entry
+  /// Get the .papersuitcase directory path for an entry
   static String cachePath(String entryPath) => p.join(entryPath, _cacheDir);
 
   /// Generate file key from relative path (SHA1 hash, first 12 chars)
@@ -35,7 +35,7 @@ class ManifestService {
     }
   }
 
-  /// Ensure .papersuitecase directory structure exists
+  /// Ensure .papersuitcase directory structure exists
   static Future<void> ensureCacheDir(String entryPath) async {
     final base = cachePath(entryPath);
     await Directory(p.join(base, _thumbnailsDir)).create(recursive: true);
@@ -54,7 +54,7 @@ class ManifestService {
     return p.join(cachePath(entryPath), _textsDir, '$key.txt');
   }
 
-  /// Save extracted text to .papersuitecase/texts/
+  /// Save extracted text to .papersuitcase/texts/
   static Future<void> saveExtractedText(
       String entryPath, String relativePath, String text) async {
     final filePath = textPath(entryPath, relativePath);

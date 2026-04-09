@@ -404,7 +404,7 @@ class EntryScannerService {
 
   /// Recursively walk an entry directory finding all PDF files.
   /// Returns relative paths (relative to entryPath).
-  /// Skips .papersuitecase directory.
+  /// Skips .papersuitcase directory.
   Future<List<String>> _walkForPdfs(String entryPath) async {
     final pdfs = <String>[];
     try {
@@ -414,8 +414,8 @@ class EntryScannerService {
 
         final relativePath = p.relative(entity.path, from: entryPath);
 
-        // Skip .papersuitecase directory
-        if (relativePath.startsWith('.papersuitecase')) continue;
+        // Skip .papersuitcase directory
+        if (relativePath.startsWith('.papersuitcase')) continue;
 
         // Skip hidden files/directories
         if (p.basename(entity.path).startsWith('.')) continue;

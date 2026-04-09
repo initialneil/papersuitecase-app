@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class SupabaseService {
   static const _supabaseUrl = 'https://rdfwekkbpsdwzytbttlk.supabase.co';
   static const _supabaseAnonKey = 'sb_publishable_Qcl9dCHY5RVt3DPasp3IlQ_6DxmHGFo';
-  static const _redirectUrl = 'io.supabase.papersuitecase://login-callback';
+  static const _redirectUrl = 'io.supabase.papersuitcase://login-callback';
 
   /// Initialize Supabase. Call once at app startup.
   /// Deep links (OAuth callbacks) are handled automatically by supabase_flutter

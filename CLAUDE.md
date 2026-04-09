@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Paper Suitecase** — A Flutter desktop (macOS-primary) app for managing academic PDF papers with hierarchical tagging, full-text search, arXiv integration, and BibTeX support.
+**Paper Suitcase** — A Flutter desktop (macOS-primary) app for managing academic PDF papers with hierarchical tagging, full-text search, arXiv integration, and BibTeX support.
 
 ## Common Commands
 
@@ -38,7 +38,7 @@ SQLite via `sqflite_common_ffi` (not drift). Schema is manually managed in `lib/
 - `PdfService` — text extraction (via syncfusion), thumbnail generation, file operations
 - `ArxivService` — arXiv API queries, metadata parsing
 - `EntryScannerService` — scans entry directories for new, removed, and renamed PDFs
-- `ManifestService` — manages per-entry `.papersuitecase/` cache directories (thumbnails, extracted text, manifest.json, references.bib). Uses SHA1 file keys and SHA256 content hashes for rename detection.
+- `ManifestService` — manages per-entry `.papersuitcase/` cache directories (thumbnails, extracted text, manifest.json, references.bib). Uses SHA1 file keys and SHA256 content hashes for rename detection.
 - `BibtexService` — BibTeX parsing and import
 
 ### Models
@@ -56,7 +56,7 @@ Single `MainScreen` with sidebar (`TagSidebar` with `EntrySidebarSection` and `T
 ### Key Patterns
 - **Desktop-first**: Custom title bar, macOS-specific paths, window management
 - **Local-first**: All data in SQLite, optional cloud sync via Supabase
-- **Symlink-only entries**: Entries reference external directories; PDFs are never copied. Each entry has a `.papersuitecase/` cache dir with manifest, thumbnails, and extracted text
+- **Symlink-only entries**: Entries reference external directories; PDFs are never copied. Each entry has a `.papersuitcase/` cache dir with manifest, thumbnails, and extracted text
 - **Auto-scanning**: `EntryScannerService` detects new/removed/renamed PDFs on startup by comparing manifest against filesystem
 - **Navigation history**: Back/forward stack tracking tag/folder/search state changes
 

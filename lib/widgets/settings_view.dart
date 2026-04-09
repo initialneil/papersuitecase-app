@@ -348,7 +348,7 @@ class SettingsView extends StatelessWidget {
                           color: Theme.of(context).colorScheme.outline,
                         ),
                         const SizedBox(width: 12),
-                        Text('Paper Suitecase v${appState.currentVersion}'),
+                        Text('Paper Suitcase v${appState.currentVersion}'),
                       ],
                     ),
                   ),

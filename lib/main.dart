@@ -16,7 +16,7 @@ void main() async {
     size: Size(1200, 800),
     minimumSize: Size(900, 600),
     center: true,
-    title: 'PaperSuitecase',
+    title: 'PaperSuitcase',
     backgroundColor: Colors.transparent,
     titleBarStyle: TitleBarStyle.hidden,
   );
@@ -32,11 +32,11 @@ void main() async {
     debugPrint('Supabase init failed (offline mode): $e');
   }
 
-  runApp(const PaperSuitecaseApp());
+  runApp(const PaperSuitcaseApp());
 }
 
-class PaperSuitecaseApp extends StatelessWidget {
-  const PaperSuitecaseApp({super.key});
+class PaperSuitcaseApp extends StatelessWidget {
+  const PaperSuitcaseApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +44,7 @@ class PaperSuitecaseApp extends StatelessWidget {
       create: (context) => AppState()..initialize(),
       builder: (context, child) {
         return MaterialApp(
-          title: 'PaperSuitecase',
+          title: 'PaperSuitcase',
           debugShowCheckedModeBanner: false,
           themeMode: context.watch<AppState>().themeMode,
           theme: _buildLightTheme(),
@@ -214,7 +214,7 @@ class _TitleBar extends StatelessWidget {
             // Centered title
             Center(
               child: Text(
-                'PaperSuitecase',
+                'PaperSuitcase',
                 style: Theme.of(
                   context,
                 ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),

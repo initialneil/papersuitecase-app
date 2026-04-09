@@ -12,7 +12,7 @@ import '../models/entry.dart';
 /// Database service for managing papers and tags
 class DatabaseService {
   static Database? _database;
-  static const String _dbName = 'paper_suitecase.db';
+  static const String _dbName = 'paper_suitcase.db';
 
   /// Initialize the database
   static Future<void> initialize() async {

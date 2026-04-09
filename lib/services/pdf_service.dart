@@ -149,7 +149,7 @@ class PdfService {
   }
 
   /// Generate thumbnail for a PDF to a specific output path.
-  /// Used by entry scanner to store thumbnails in .papersuitecase/thumbnails/.
+  /// Used by entry scanner to store thumbnails in .papersuitcase/thumbnails/.
   static Future<String?> generateThumbnailToPath(
       String pdfPath, String outputPath) async {
     try {
